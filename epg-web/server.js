@@ -2,8 +2,9 @@
  * VLC EPG Web UI — EPG grid companion.
  *
  * A zero-dependency Node server that:
- *   - serves a single-page EPG grid UI
- *   - downloads/parses the M3U playlist and XMLTV guide (URL or local file)
+ *   - serves a single-page EPG grid UI (read fresh from disk per request)
+ *   - downloads/parses the M3U playlist and XMLTV guide (URL or local file),
+ *     including gzip-compressed sources (.gz / Content-Encoding: gzip)
  *   - matches channels to programs (tvg-id cleaned, then name)
  *   - drives VLC playback: clicking a program launches vlc.exe with the
  *     stream URL (kills the previous instance so it behaves like channel
@@ -15,8 +16,8 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const zlib = require('zlib');
 const { spawn } = require('child_process');
-const os = require('os');
 
 const PORT = process.env.PORT || 8123;
 const VLC = process.env.VLC_BIN || (
@@ -24,29 +25,68 @@ const VLC = process.env.VLC_BIN || (
     ? 'C:\\Program Files\\VideoLAN\\VLC\\vlc.exe'
     : 'vlc'
 );
+const MAX_BODY = 1 << 20;            // 1 MB request body cap
+const FETCH_TIMEOUT = 30000;
+const PUBLIC_DIR = path.join(__dirname, 'public');
 
 /* ------------------------------------------------------------------ */
-/* fetch helper                                                        */
+/* HTTP helpers                                                        */
 /* ------------------------------------------------------------------ */
-function fetchText(src, timeoutMs = 20000) {
+function sendJSON(res, code, obj) {
+  const body = JSON.stringify(obj);
+  res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Content-Length': Buffer.byteLength(body) });
+  res.end(body);
+}
+async function readBody(req) {
+  let body = '';
+  for await (const chunk of req) {
+    body += chunk;
+    if (body.length > MAX_BODY) throw Object.assign(new Error('request too large'), { status: 413 });
+  }
+  return body;
+}
+function parseJSON(text) {
+  try { return JSON.parse(text); }
+  catch (e) { throw Object.assign(new Error('invalid JSON body'), { status: 400 }); }
+}
+
+/* ------------------------------------------------------------------ */
+/* Fetch (with gzip support and timeout)                              */
+/* ------------------------------------------------------------------ */
+function isGzipBuffer(buf) {
+  return buf.length >= 2 && buf[0] === 0x1f && buf[1] === 0x8b;
+}
+
+function fetchBuffer(src, timeoutMs = FETCH_TIMEOUT) {
   const isUrl = /^https?:\/\//i.test(src);
   if (!isUrl) {
-    // local file path
-    if (!fs.existsSync(src)) throw new Error('file not found: ' + src);
-    return fs.readFileSync(src, 'utf8');
+    if (!fs.existsSync(src)) throw Object.assign(new Error('file not found: ' + src), { status: 404 });
+    return fs.readFileSync(src);
   }
   return new Promise((resolve, reject) => {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), timeoutMs);
     fetch(src, { signal: ctrl.signal })
-      .then(r => {
+      .then(async r => {
         if (!r.ok) throw new Error('HTTP ' + r.status + ' for ' + src);
-        return r.text();
+        return Buffer.from(await r.arrayBuffer());
       })
       .then(resolve)
-      .catch(e => reject(new Error(e.name === 'AbortError' ? 'timeout fetching ' + src : String(e.message || e))))
+      .catch(e => reject(e.name === 'AbortError'
+        ? new Error('timeout fetching ' + src)
+        : e))
       .finally(() => clearTimeout(timer));
   });
+}
+
+function decompress(buf) {
+  if (isGzipBuffer(buf)) return zlib.gunzipSync(buf);
+  return buf;
+}
+
+async function fetchText(src, timeoutMs) {
+  const buf = decompress(await fetchBuffer(src, timeoutMs));
+  return buf.toString('utf8');
 }
 
 /* ------------------------------------------------------------------ */
@@ -97,13 +137,12 @@ function parseM3U(text) {
 }
 
 /* ------------------------------------------------------------------ */
-/* XMLTV parser (browser/DOMParser not available → regex-based)        */
+/* XMLTV parser                                                        */
 /* ------------------------------------------------------------------ */
 const QUALITY = ['fhd','hd','uhd','4k','2k','8k','sd','hq','720p','360p','480p','576p','1080p','2160p','plus1','latin','mex','bar'];
 
 function canonId(id) {
-  let base = id.replace(/@[^@]*$/, '');
-  const toks = base.toLowerCase().match(/[a-z0-9]+/g) || [];
+  const toks = id.replace(/@[^@]*$/, '').toLowerCase().match(/[a-z0-9]+/g) || [];
   return toks.filter(t => !QUALITY.includes(t)).join('');
 }
 function normalize(s) {
@@ -120,13 +159,16 @@ function xmltvTime(ts) {
   const [ , Y, Mo, D, H, Mi, S, sign, offH, offM] = m;
   const utc = Date.UTC(+Y, +Mo - 1, +D, +H, +Mi, +S);
   const off = (sign[0] === '-' ? -1 : 1) * ((+(offH || 0)) * 3600 + (+(offM || 0)) * 60) * 1000;
-  return utc - off; // ms epoch
+  return utc - off;
 }
 
+const dec = s => s.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+                  .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&apos;/g, "'");
+
 function parseXMLTV(text) {
-  const channels = {};   // id -> {id, displayNames:[], logos:[]}
-  const programs = {};   // id -> [{start,stop,title,desc,cat}]
-  const nameMap = {};    // "i:<canon>" -> id, "n:<norm>" -> id, "l:<loose>" -> id
+  const channels = {};
+  const programs = {};
+  const nameMap = {};
 
   const channelRe = /<channel\b([^>]*)>([\s\S]*?)<\/channel>/g;
   let m;
@@ -155,8 +197,6 @@ function parseXMLTV(text) {
     const title = ((body.match(/<title[^>]*>([\s\S]*?)<\/title>/) || [])[1] || '').trim();
     const desc = ((body.match(/<desc[^>]*>([\s\S]*?)<\/desc>/) || [])[1] || '').trim();
     const cat = ((body.match(/<category[^>]*>([\s\S]*?)<\/category>/) || [])[1] || '').trim();
-    const dec = s => s.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
-                      .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&apos;/g, "'");
     (programs[chId] = programs[chId] || []).push({
       start, stop, title: dec(title), desc: dec(desc), cat: dec(cat),
     });
@@ -197,8 +237,7 @@ let vlcChild = null;
 function playStream(url) {
   return new Promise((resolve, reject) => {
     if (vlcChild) { try { vlcChild.kill(); } catch (_) {} vlcChild = null; }
-    const args = ['--fullscreen', url];
-    const child = spawn(VLC, args, { detached: false });
+    const child = spawn(VLC, ['--fullscreen', url], { detached: false });
     vlcChild = child;
     child.on('error', e => reject(new Error('failed to launch VLC: ' + e.message)));
     child.once('spawn', () => resolve({ launched: true, url }));
@@ -212,39 +251,33 @@ function stopPlay() {
 /* ------------------------------------------------------------------ */
 /* HTTP server                                                         */
 /* ------------------------------------------------------------------ */
-const HTML = fs.readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8');
-
-function sendJSON(res, code, obj) {
-  const body = JSON.stringify(obj);
-  res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Content-Length': Buffer.byteLength(body) });
-  res.end(body);
+function serveIndex(req, res) {
+  // Read fresh on every request so UI edits don't require a server restart.
+  fs.readFile(path.join(PUBLIC_DIR, 'index.html'), (err, buf) => {
+    if (err) return sendJSON(res, 500, { error: 'index.html missing' });
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Length': buf.length });
+    res.end(buf);
+  });
 }
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://127.0.0.1');
   const p = url.pathname;
   try {
-    if (p === '/' || p === '/index.html') {
-      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-      return res.end(HTML);
-    }
+    if (p === '/' || p === '/index.html') return serveIndex(req, res);
     if (p === '/health') return sendJSON(res, 200, { ok: true, ts: Date.now() });
 
     if (p === '/parse/m3u' && req.method === 'POST') {
-      let body = '';
-      for await (const c of req) body += c;
-      const { src } = JSON.parse(body);
-      const text = await fetchText(src);
-      const parsed = parseM3U(text);
+      const { src } = parseJSON(await readBody(req));
+      if (!src) throw Object.assign(new Error('src is required'), { status: 400 });
+      const parsed = parseM3U(await fetchText(src));
       return sendJSON(res, 200, parsed);
     }
 
     if (p === '/parse/xmltv' && req.method === 'POST') {
-      let body = '';
-      for await (const c of req) body += c;
-      const { src } = JSON.parse(body);
-      const text = await fetchText(src);
-      const parsed = parseXMLTV(text);
+      const { src } = parseJSON(await readBody(req));
+      if (!src) throw Object.assign(new Error('src is required'), { status: 400 });
+      const parsed = parseXMLTV(await fetchText(src));
       return sendJSON(res, 200, {
         channelCount: Object.keys(parsed.channels).length,
         programCount: Object.values(parsed.programs).reduce((a, l) => a + l.length, 0),
@@ -253,13 +286,10 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (p === '/match' && req.method === 'POST') {
-      let body = '';
-      for await (const c of req) body += c;
-      const { m3u, xmltv } = JSON.parse(body);
-      const m3uText = await fetchText(m3u);
-      const xmlText = await fetchText(xmltv);
-      const playlist = parseM3U(m3uText);
-      const guide = parseXMLTV(xmlText);
+      const { m3u, xmltv } = parseJSON(await readBody(req));
+      if (!m3u || !xmltv) throw Object.assign(new Error('m3u and xmltv are required'), { status: 400 });
+      const playlist = parseM3U(await fetchText(m3u));
+      const guide = parseXMLTV(await fetchText(xmltv));
       const stats = matchChannels(playlist.channels, guide);
       const matched = playlist.channels.filter(c => c.epg).length;
       return sendJSON(res, 200, {
@@ -271,9 +301,8 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (p === '/play' && req.method === 'POST') {
-      let body = '';
-      for await (const c of req) body += c;
-      const { url } = JSON.parse(body);
+      const { url } = parseJSON(await readBody(req));
+      if (!url) throw Object.assign(new Error('url is required'), { status: 400 });
       const r = await playStream(url);
       return sendJSON(res, 200, r);
     }
@@ -282,7 +311,8 @@ const server = http.createServer(async (req, res) => {
 
     return sendJSON(res, 404, { error: 'not found' });
   } catch (e) {
-    return sendJSON(res, 500, { error: String(e.message || e) });
+    const status = e.status || 500;
+    return sendJSON(res, status, { error: String(e.message || e) });
   }
 });
 
@@ -290,3 +320,12 @@ server.listen(PORT, '127.0.0.1', () => {
   console.log('VLC EPG Web UI  →  http://127.0.0.1:' + PORT);
   console.log('VLC binary: ' + VLC);
 });
+
+// Graceful shutdown: kill VLC child too.
+function shutdown() {
+  stopPlay();
+  server.close(() => process.exit(0));
+  setTimeout(() => process.exit(0), 1500).unref();
+}
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);
