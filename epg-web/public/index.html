@@ -43,6 +43,20 @@
   .bar input[type=text] { width:190px; }
   .bar .hint { color:var(--muted); margin-left:auto; }
 
+  /* jump-to-channel autocomplete */
+  .jumpwrap { position:relative; }
+  .jumpwrap input { width:200px; }
+  .jump-results { position:absolute; top:100%; left:0; margin-top:2px; min-width:240px;
+    max-height:320px; overflow:auto; background:var(--panel); border:1px solid var(--border);
+    border-radius:8px; z-index:70; box-shadow:0 8px 24px rgba(0,0,0,.5); display:none; }
+  .jump-results.open { display:block; }
+  .jump-results .jr { padding:7px 10px; cursor:pointer; font-size:12.5px;
+    border-bottom:1px solid var(--grid); }
+  .jump-results .jr:hover, .jump-results .jr.active { background:var(--accent); color:#fff; }
+  .jump-results .jr .g { font-size:10px; color:var(--muted); margin-left:6px; }
+  .jump-results .jr:hover .g { color:#dde3ff; }
+  .jump-results .jr-none { padding:8px 10px; color:var(--muted); font-size:12px; }
+
   /* now playing bar */
   .nowbar { display:flex; align-items:center; gap:10px; padding:6px 16px;
     background:linear-gradient(90deg, #1a2030, #202738); border-bottom:1px solid var(--border);
@@ -164,6 +178,11 @@
       <option value="2">±2 h</option><option value="3" selected>±3 h</option>
       <option value="6">±6 h</option><option value="12">±12 h</option>
     </select>
+    <span class="grp">Channel:</span>
+    <span class="jumpwrap">
+      <input type="text" id="chJump" placeholder="Jump to channel…" autocomplete="off">
+      <div class="jump-results" id="chJumpResults"></div>
+    </span>
     <span class="hint">click a channel or program to watch · ★ = favorite</span>
   </div>
 
@@ -268,14 +287,14 @@ async function loadGuide() {
     const m = await post('/parse/m3u', { src: m3u });
     if (!guide && m.headerEpg) { guide = m.headerEpg; $('xmltv').value = guide; }
     if (!guide) {
-      state.channels = m.channels.map(c => ({ ...c, programs: [], epg: null, matchHow: null }));
+      state.channels = m.channels.map((c, i) => ({ ...c, _src: i, programs: [], epg: null, matchHow: null }));
       state.groups = m.groupList;
       render();
       setStatus(m.channels.length + ' channels loaded (no EPG source auto-found). Click a channel to play.');
       return;
     }
     const match = await post('/match', { m3u, xmltv: guide });
-    state.channels = match.channels;
+    state.channels = match.channels.map((c, i) => ({ ...c, _src: i }));
     state.groups = match.groups;
     render();
     const withEpg = match.channels.filter(c => c.epg).length;
@@ -340,16 +359,6 @@ function render() {
   grp.innerHTML = '<option value="">All channels</option>' +
     state.groups.map(g => `<option ${g===selGroup?'selected':''}>${escapeHtml(g)}</option>`).join('');
 
-  const chSel = $('chSel');
-  if (chSel) {
-    chSel.innerHTML = '<option value="">Jump to channel…</option>' + channels.map((c,i) =>
-      `<option value="${i}">${escapeHtml(c.name)}</option>`).join('');
-    chSel.onchange = () => {
-      const i = parseInt(chSel.value, 10);
-      if (!isNaN(i)) { const el = document.getElementById('row-' + i); if (el) { el.scrollIntoView({block:'nearest'}); chSel.value=''; } }
-    };
-  }
-
   let html = buildRuler(halfHours, pxPerHour, now);
   html += '<div class="grid" style="width:' + totalW + 'px">';
 
@@ -358,7 +367,7 @@ function render() {
     const np = nowProgram(ch, now);
     const isPlaying = state.current && state.current.url === ch.url;
 
-    html += '<div class="row' + (isPlaying ? ' playing' : '') + '" id="row-' + idx + '">';
+    html += '<div class="row' + (isPlaying ? ' playing' : '') + '" id="row-' + idx + '" data-src="' + (ch._src != null ? ch._src : idx) + '">';
     html += '<div class="ch">';
     if (ch.logo) html += `<img src="${escapeHtml(ch.logo)}" loading="lazy" onerror="this.style.display='none'">`;
     html += '<div class="cinfo">';
@@ -484,12 +493,61 @@ $('window').addEventListener('change', () => { if (state.channels.length) render
 $('m3u').addEventListener('keydown', e => { if (e.key === 'Enter') loadGuide(); });
 $('xmltv').addEventListener('keydown', e => { if (e.key === 'Enter') loadGuide(); });
 
-(function ensureChSel() {
-  const bar = document.querySelector('.bar');
-  if (document.getElementById('chSel') || !bar) return;
-  const wrap = document.createElement('span');
-  wrap.innerHTML = '<span class="grp">Channel:</span><select id="chSel" style="max-width:200px"><option value="">Jump…</option></select>';
-  bar.insertBefore(wrap, bar.querySelector('.hint'));
+/* ---------- jump-to-channel autocomplete ---------- */
+(function setupJump() {
+  const input = document.getElementById('chJump');
+  const box = document.getElementById('chJumpResults');
+  if (!input || !box) return;
+
+  const LIMIT = 60;
+  let active = -1;
+  let matches = [];
+
+  function close() { box.classList.remove('open'); box.innerHTML = ''; active = -1; }
+
+  function renderResults() {
+    if (!matches.length) {
+      box.innerHTML = '<div class="jr-none">no channel matches</div>';
+    } else {
+      box.innerHTML = matches.map((m, i) =>
+        `<div class="jr ${i===active?'active':''}" data-i="${i}">${escapeHtml(m.name)}` +
+        (m.group ? `<span class="g">${escapeHtml(m.group)}</span>` : '') + '</div>').join('');
+    }
+    box.classList.add('open');
+  }
+
+  function jumpTo(m) {
+    close();
+    input.value = '';
+    // clear filters so the channel is visible, then scroll
+    $('group').value = ''; $('filter').value = 'all'; $('q').value = '';
+    render();
+    const el = document.querySelector(`.row[data-src="${m._src}"]`);
+    if (el) el.scrollIntoView({ block: 'nearest' });
+  }
+
+  input.addEventListener('input', () => {
+    const q = input.value.trim().toLowerCase();
+    if (!q) { close(); return; }
+    matches = state.channels.filter(c => c.name.toLowerCase().includes(q)).slice(0, LIMIT);
+    active = -1;
+    renderResults();
+  });
+
+  input.addEventListener('keydown', (e) => {
+    if (!box.classList.contains('open')) return;
+    if (e.key === 'ArrowDown') { e.preventDefault(); active = Math.min(active + 1, matches.length - 1); renderResults(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); active = Math.max(active - 1, 0); renderResults(); }
+    else if (e.key === 'Enter') { e.preventDefault(); if (matches[active]) jumpTo(matches[active]); else if (matches[0]) jumpTo(matches[0]); }
+    else if (e.key === 'Escape') { close(); }
+  });
+
+  box.addEventListener('mousedown', (e) => {
+    const it = e.target.closest('.jr');
+    if (it) jumpTo(matches[parseInt(it.dataset.i, 10)]);
+  });
+
+  input.addEventListener('blur', () => setTimeout(close, 120));
 })();
 
 loadFav();
