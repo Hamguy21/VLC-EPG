@@ -107,7 +107,9 @@
   .prog .d { font-size:10.5px; color:var(--muted); white-space:nowrap; overflow:hidden;
     text-overflow:ellipsis; }
   .prog.noinfo { border-style:dashed; border-left:3px dashed var(--muted);
-    background:transparent; color:var(--muted); display:flex; align-items:center; font-size:11px; }
+    background:transparent; color:var(--muted); display:flex; align-items:center;
+    justify-content:center; text-align:center; font-size:11px; padding:4px 12px;
+    white-space:normal; overflow:visible; }
 
   .nowline { position:absolute; top:0; bottom:0; width:2px; background:var(--now);
     z-index:5; pointer-events:none; }
@@ -382,7 +384,8 @@ function render() {
 
     const progs = (ch.programs || []).filter(p => p.stop > start && p.start < end);
     if (progs.length === 0) {
-      html += `<div class="prog noinfo" style="left:0px;width:${totalW}px">${ch.epg ? 'No program in this window' : 'No EPG data — click the channel to play anyway'}</div>`;
+      const CH_W = 240; // sticky channel column width; start fallback to its right
+      html += `<div class="prog noinfo" style="left:${CH_W}px;width:${totalW - CH_W}px">${ch.epg ? 'No program in this window' : 'No EPG data — click the channel to play anyway'}</div>`;
     }
     for (const p of progs) {
       const left = Math.max(0, (p.start - start) / 3600e3) * pxPerHour;
