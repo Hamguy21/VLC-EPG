@@ -81,6 +81,12 @@
   .row { position:relative; height:72px; border-bottom:1px solid var(--grid); cursor:pointer; }
   .row:hover { background:rgba(86,115,245,.06); }
   .row.playing { box-shadow:inset 3px 0 0 var(--accent); }
+  .row.selected { background:rgba(86,115,245,.10); }
+  .row.selected .ch { background:linear-gradient(90deg, rgba(86,115,245,.22), rgba(86,115,245,.06) 80%); }
+  .row.selected .ch .name { color:var(--accent2); }
+  .row.selected::before { content:""; position:absolute; left:0; top:0; bottom:0; width:3px;
+    background:var(--accent); z-index:12; }
+  .row.selected .ch .nowprog { color:var(--accent2); }
   .row .ch { position:sticky; left:0; z-index:10; width:240px; height:72px;
     background:var(--panel); border-right:1px solid var(--border);
     display:flex; align-items:center; gap:8px; padding:6px 8px; }
@@ -167,6 +173,25 @@
     background:#222a38; border:1px solid var(--border); padding:10px 18px; border-radius:8px;
     font-size:13px; z-index:100; opacity:0; transition:opacity .2s; pointer-events:none; }
   .toast.show { opacity:1; }
+
+  /* TV mode: bigger text/hit areas for viewing at a distance */
+  body.tv .row { height:96px; }
+  body.tv .row .ch { width:300px; height:96px; }
+  body.tv .row .ch .name { font-size:16px; }
+  body.tv .row .ch .nowprog { font-size:13px; }
+  body.tv .row .ch .group { font-size:12px; }
+  body.tv .row .ch { font-size:22px; }
+  body.tv .prog .tt { font-size:15px; }
+  body.tv .prog .t { font-size:13px; }
+  body.tv .ruler { height:42px; }
+  body.tv .ruler .tick { font-size:13px; }
+  body.tv .details { font-size:15px; }
+  body.tv .details .d-title { font-size:20px; }
+  body.tv .details .d-desc { font-size:15px; }
+  body.tv .details .dm-k { font-size:13px; }
+  body.tv .details .dm-v { font-size:15px; }
+  body.tv .details .d-list .dl-item { font-size:15px; }
+  body.tv .btn { font-size:15px; padding:10px 16px; }
 
   /* settings modal */
   .overlay { position:fixed; inset:0; background:rgba(0,0,0,.45); z-index:90;
@@ -278,6 +303,11 @@
         <label class="fmt-opt"><input type="radio" name="dfmt" value="MDY"> M / D / Y</label>
       </div>
     </div>
+    <div class="p-row">
+      <label class="fmt-opt" style="display:inline-flex;gap:8px">
+        <input type="checkbox" id="tvMode"> TV mode (bigger UI for remote / distance)
+      </label>
+    </div>
     <div class="p-actions">
       <button class="btn ghost" id="settClose">Close</button>
     </div>
@@ -289,17 +319,21 @@
 <script>
 const $ = id => document.getElementById(id);
 const stage = $('stage');
-const state = { channels: [], groups: [], now: Date.now(), fav: new Set(), current: null, dfmt: 'DMY' };
+const state = { channels: [], groups: [], now: Date.now(), fav: new Set(), current: null, dfmt: 'DMY', sel: null, view: [] };
 let timer = null;
 const LS_SOURCES = 'vlcEpgSources';
 const LS_FAV = 'vlcEpgFavorites';
 const LS_DFMT = 'vlcEpgDateFormat';
+const LS_TV = 'vlcEpgTvMode';
 
 function loadFav() { try { state.fav = new Set(JSON.parse(localStorage.getItem(LS_FAV) || '[]')); } catch (_) {} }
 function saveFav() { localStorage.setItem(LS_FAV, JSON.stringify([...state.fav])); }
 
 function loadDfmt() { try { const v = localStorage.getItem(LS_DFMT); if (v === 'YMD' || v === 'MDY') state.dfmt = v; } catch (_) {} }
 function saveDfmt() { localStorage.setItem(LS_DFMT, state.dfmt); }
+
+function loadTv() { try { if (localStorage.getItem(LS_TV) === '1') document.body.classList.add('tv'); } catch (_) {} }
+function applyTv(on) { document.body.classList.toggle('tv', on); localStorage.setItem(LS_TV, on ? '1' : '0'); }
 
 function toast(msg, isErr) {
   const t = $('toast'); t.textContent = msg; t.classList.add('show');
@@ -424,11 +458,13 @@ function openSettings() {
     r.checked = sel;
     r.closest('.fmt-opt').classList.toggle('sel', sel);
   });
+  $('tvMode').checked = document.body.classList.contains('tv');
   $('overlay').classList.add('open');
 }
 function closeSettings() { $('overlay').classList.remove('open'); }
 $('settingsBtn').addEventListener('click', openSettings);
 $('settClose').addEventListener('click', closeSettings);
+$('tvMode').addEventListener('change', e => { applyTv(e.target.checked); });
 $('overlay').addEventListener('click', e => { if (e.target === $('overlay')) closeSettings(); });
 $('fmtOpts').addEventListener('change', e => {
   if (e.target.name !== 'dfmt') return;
@@ -573,6 +609,9 @@ function render() {
   grp.innerHTML = '<option value="">All channels</option>' +
     state.groups.map(g => `<option ${g===selGroup?'selected':''}>${escapeHtml(g)}</option>`).join('');
 
+  state.view = channels;
+  if (state.sel != null && state.sel >= channels.length) state.sel = channels.length - 1;
+
   let html = buildRuler(halfHours, pxPerHour, now);
   html += '<div class="grid" style="width:' + totalW + 'px">';
 
@@ -580,8 +619,9 @@ function render() {
     const isFav = state.fav.has(favKey(ch));
     const np = nowProgram(ch, now);
     const isPlaying = state.current && state.current.url === ch.url;
+    const isSel = idx === state.sel;
 
-    html += '<div class="row' + (isPlaying ? ' playing' : '') + '" id="row-' + idx + '" data-src="' + (ch._src != null ? ch._src : idx) + '">';
+    html += '<div class="row' + (isPlaying ? ' playing' : '') + (isSel ? ' selected' : '') + '" id="row-' + idx + '" data-src="' + (ch._src != null ? ch._src : idx) + '">';
     html += '<div class="ch">';
     if (ch.logo) html += `<img src="${escapeHtml(ch.logo)}" loading="lazy" onerror="this.style.display='none'">`;
     html += '<div class="cinfo">';
@@ -631,6 +671,8 @@ function render() {
       const idx = parseInt(row.id.split('-')[1], 10);
       const ch = channels[idx];
       if (!ch) return;
+      state.sel = idx;
+      render();
       showChannelDetails(ch);
     });
   });
@@ -814,6 +856,36 @@ stage.addEventListener('wheel', (e) => {
   }
 }, { passive: false });
 
+// ---- Remote / keyboard navigation (TV-style) ----
+function selectAt(idx) {
+if (!state.view.length) return;
+if (idx < 0) idx = 0;
+if (idx >= state.view.length) idx = state.view.length - 1;
+state.sel = idx;
+render();
+const row = document.getElementById('row-' + idx);
+if (row) row.scrollIntoView({ block: 'nearest' });
+}
+function selChannel() { return state.sel != null ? state.view[state.sel] : null; }
+window.addEventListener('keydown', (e) => {
+// ignore when typing in an input/select/textarea
+const t = e.target;
+if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA')) return;
+if (!state.view.length) return;
+switch (e.key) {
+  case 'ArrowDown': e.preventDefault(); selectAt((state.sel == null ? -1 : state.sel) + 1); break;
+  case 'ArrowUp':   e.preventDefault(); selectAt((state.sel == null ? 1 : state.sel) - 1); break;
+  case 'ArrowRight': e.preventDefault(); stage.scrollLeft += 140; break;
+  case 'ArrowLeft':  e.preventDefault(); stage.scrollLeft -= 140; break;
+  case 'Enter': {
+    const ch = selChannel(); if (ch) { e.preventDefault(); playChannel(ch); } break;
+  }
+  case ' ': {
+    const ch = selChannel(); if (ch) { e.preventDefault(); playChannel(ch); } break;
+  }
+}
+});
+
 /* ---------- jump-to-channel autocomplete ---------- */
 (function setupJump() {
   const input = document.getElementById('chJump');
@@ -873,6 +945,7 @@ stage.addEventListener('wheel', (e) => {
 
 loadFav();
 loadDfmt();
+loadTv();
 refreshSavedDropdown('');
 </script>
 </body>
