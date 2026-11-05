@@ -18,3 +18,4 @@ Thumbs.db
 # Web UI
 epg-web/node_modules/
 epg-web/package-lock.json
+epg-web/backup/

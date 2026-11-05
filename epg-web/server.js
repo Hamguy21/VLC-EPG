@@ -51,7 +51,7 @@ function parseJSON(text) {
 }
 
 /* ------------------------------------------------------------------ */
-/* Fetch (with gzip support and timeout)                              */
+/* Fetch (with gzip support, timeout and optional in-memory cache)    */
 /* ------------------------------------------------------------------ */
 function isGzipBuffer(buf) {
   return buf.length >= 2 && buf[0] === 0x1f && buf[1] === 0x8b;
@@ -84,9 +84,22 @@ function decompress(buf) {
   return buf;
 }
 
-async function fetchText(src, timeoutMs) {
-  const buf = decompress(await fetchBuffer(src, timeoutMs));
-  return buf.toString('utf8');
+const fetchCache = new Map(); // url -> { ts, text }
+
+/**
+ * Fetch a source as text. For http(s) URLs, an optional ttlMs enables a
+ * short in-memory cache so repeat loads of big playlists/guides are fast.
+ */
+async function fetchText(src, timeoutMs, ttlMs = 0) {
+  const isUrl = /^https?:\/\//i.test(src);
+  if (!isUrl) return decompress(await fetchBuffer(src, timeoutMs)).toString('utf8');
+  if (ttlMs > 0) {
+    const hit = fetchCache.get(src);
+    if (hit && Date.now() - hit.ts < ttlMs) return hit.text;
+  }
+  const text = decompress(await fetchBuffer(src, timeoutMs)).toString('utf8');
+  if (ttlMs > 0) fetchCache.set(src, { ts: Date.now(), text });
+  return text;
 }
 
 /* ------------------------------------------------------------------ */
@@ -122,6 +135,9 @@ function parseM3U(text) {
         url: null,
       };
       if (!pending.name) pending.name = pending.tvg_name;
+    } else if (line.startsWith('#EXTGRP:') && pending) {
+      // EXTGRP is a fallback for playlists that omit group-title on EXTINF
+      if (!pending.group) pending.group = line.slice(8).trim();
     } else if (!line.startsWith('#') && pending) {
       pending.url = line;
       if (!pending.name) {
@@ -153,12 +169,21 @@ function loose(s) {
   return (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
+/**
+ * Parse an XMLTV timestamp. Accepts:
+ *   20240101120000 +0200      (with numeric offset)
+ *   20240101120000 +02:00     (with colon offset)
+ *   20240101120000            (no offset -> interpreted as UTC)
+ * Returns epoch ms, or null if the string is unparseable.
+ */
 function xmltvTime(ts) {
-  const m = ts.trim().match(/^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})\s*([+-]\d{2}):?(\d{2})?$/);
+  if (!ts) return null;
+  const m = ts.trim().match(/^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})(?:\s*([+-])(\d{2}):?(\d{2})?)?$/);
   if (!m) return null;
-  const [ , Y, Mo, D, H, Mi, S, sign, offH, offM] = m;
+  const [, Y, Mo, D, H, Mi, S, sign, offH, offM] = m;
   const utc = Date.UTC(+Y, +Mo - 1, +D, +H, +Mi, +S);
-  const off = (sign[0] === '-' ? -1 : 1) * ((+(offH || 0)) * 3600 + (+(offM || 0)) * 60) * 1000;
+  if (!sign) return utc; // no offset given: assume UTC
+  const off = (sign === '-' ? -1 : 1) * ((+(offH || 0)) * 3600 + (+(offM || 0)) * 60) * 1000;
   return utc - off;
 }
 
@@ -170,11 +195,12 @@ function parseXMLTV(text) {
   const programs = {};
   const nameMap = {};
 
-  const channelRe = /<channel\b([^>]*)>([\s\S]*?)<\/channel>/g;
+  // Handles both <channel ...>...</channel> and self-closing <channel .../>
+  const channelRe = /<channel\b([^>]*?)(?:\/>|>([\s\S]*?)<\/channel>)/g;
   let m;
   while ((m = channelRe.exec(text))) {
     const attrs = m[1];
-    const body = m[2];
+    const body = m[2] || '';
     const id = (attrs.match(/id="([^"]*)"/) || [])[1];
     if (!id) continue;
     const ch = { id, displayNames: [], logos: [] };
@@ -234,13 +260,29 @@ function matchChannels(channels, guide) {
 /* VLC playback                                                        */
 /* ------------------------------------------------------------------ */
 let vlcChild = null;
-function playStream(url) {
+function playStream(url, name) {
   return new Promise((resolve, reject) => {
     if (vlcChild) { try { vlcChild.kill(); } catch (_) {} vlcChild = null; }
-    const child = spawn(VLC, ['--fullscreen', url], { detached: false });
+    const args = ['--fullscreen'];
+    if (name) args.push('--meta-title=' + name);
+    args.push(url);
+    let child;
+    try {
+      child = spawn(VLC, args, { detached: false });
+    } catch (e) {
+      return reject(new Error('failed to launch VLC: ' + e.message));
+    }
     vlcChild = child;
-    child.on('error', e => reject(new Error('failed to launch VLC: ' + e.message)));
-    child.once('spawn', () => resolve({ launched: true, url }));
+    const onErr = e => {
+      if (vlcChild === child) vlcChild = null;
+      reject(new Error('failed to launch VLC: ' + e.message));
+    };
+    child.once('error', onErr);
+    child.once('spawn', () => {
+      child.removeListener('error', onErr);
+      resolve({ launched: true, url });
+    });
+    child.once('exit', () => { if (vlcChild === child) vlcChild = null; });
   });
 }
 function stopPlay() {
@@ -253,14 +295,12 @@ function stopPlay() {
 /* ------------------------------------------------------------------ */
 // Country/region name -> ISO code for epg.pw per-country guides.
 const COUNTRY_MAP = {
-  // direct country names
   'australia':'AU','brazil':'BR','canada':'CA','china':'CN','germany':'DE',
   'france':'FR','united kingdom':'GB','uk':'GB','britain':'GB','great britain':'GB',
   'hong kong':'HK','indonesia':'ID','india':'IN','japan':'JP','malaysia':'MY',
   'new zealand':'NZ','philippines':'PH','russia':'RU','singapore':'SG',
   'taiwan':'TW','united states':'US','usa':'US','america':'US','vietnam':'VN',
   'south africa':'ZA',
-  // US states
   'alabama':'US','alaska':'US','arizona':'US','arkansas':'US','california':'US',
   'colorado':'US','connecticut':'US','delaware':'US','florida':'US','georgia':'US',
   'hawaii':'US','idaho':'US','illinois':'US','indiana':'US','iowa':'US',
@@ -272,25 +312,20 @@ const COUNTRY_MAP = {
   'rhode island':'US','south carolina':'US','south dakota':'US','tennessee':'US',
   'texas':'US','utah':'US','vermont':'US','virginia':'US','washington':'US',
   'west virginia':'US','wisconsin':'US','wyoming':'US','district of columbia':'US',
-  // Canadian provinces
   'alberta':'CA','british columbia':'CA','manitoba':'CA','new brunswick':'CA',
   'newfoundland':'CA','nova scotia':'CA','ontario':'CA','prince edward island':'CA',
   'quebec':'CA','saskatchewan':'CA','nunavut':'CA','northwest territories':'CA',
   'yukon':'CA',
-  // India states / major regions
   'andhra pradesh':'IN','assam':'IN','bihar':'IN','gujarat':'IN','haryana':'IN',
   'karnataka':'IN','kerala':'IN','madhya pradesh':'IN','maharashtra':'IN',
   'orissa':'IN','punjab':'IN','rajasthan':'IN','tamil nadu':'IN','telangana':'IN',
   'uttar pradesh':'IN','west bengal':'IN','delhi':'IN','mumbai':'IN',
-  // Brazil states
   'sao paulo':'BR','rio de janeiro':'BR','minas gerais':'BR','bahia':'BR',
   'parana':'BR','rio grande do sul':'BR','pernambuco':'BR','ceara':'BR',
   'goias':'BR','amazonas':'BR','espirito santo':'BR','santa catarina':'BR',
-  // others
   'england':'GB','scotland':'GB','wales':'GB','northern ireland':'GB','ireland':'GB',
 };
 
-// epg.pw guide URLs by ISO code.
 const EPGPW = code => `https://epg.pw/xmltv/epg_${code}.xml.gz`;
 
 const guideCache = new Map(); // code -> { ts, parsed }
@@ -306,7 +341,6 @@ function groupCountries(groups) {
     const code = resolveCountry(g);
     if (code) set.add(code);
     else {
-      // try to match a substring (e.g. "United States of America")
       const low = g.toLowerCase();
       for (const [k, v] of Object.entries(COUNTRY_MAP)) {
         if (k.length > 3 && low.includes(k)) { set.add(v); break; }
@@ -327,10 +361,9 @@ async function fetchGuide(code) {
 }
 
 async function grabEPG(m3u, requestedCountries) {
-  const playlistText = await fetchText(m3u);
+  const playlistText = await fetchText(m3u, undefined, 15 * 60 * 1000);
   const playlist = parseM3U(playlistText);
 
-  // Resolve which per-country guides to pull.
   let codes;
   if (Array.isArray(requestedCountries) && requestedCountries.length) {
     codes = requestedCountries.map(c => resolveCountry(c)).filter(Boolean);
@@ -346,7 +379,6 @@ async function grabEPG(m3u, requestedCountries) {
     };
   }
 
-  // Fetch + merge guides.
   const merged = { channels: {}, programs: {}, nameMap: {} };
   const failures = [];
   for (const code of codes) {
@@ -382,6 +414,9 @@ function serveIndex(req, res) {
   });
 }
 
+const M3U_TTL = 15 * 60 * 1000;    // playlists change rarely
+const XMLTV_TTL = 30 * 60 * 1000;  // guides update a few times per day
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://127.0.0.1');
   const p = url.pathname;
@@ -392,14 +427,14 @@ const server = http.createServer(async (req, res) => {
     if (p === '/parse/m3u' && req.method === 'POST') {
       const { src } = parseJSON(await readBody(req));
       if (!src) throw Object.assign(new Error('src is required'), { status: 400 });
-      const parsed = parseM3U(await fetchText(src));
+      const parsed = parseM3U(await fetchText(src, undefined, M3U_TTL));
       return sendJSON(res, 200, parsed);
     }
 
     if (p === '/parse/xmltv' && req.method === 'POST') {
       const { src } = parseJSON(await readBody(req));
       if (!src) throw Object.assign(new Error('src is required'), { status: 400 });
-      const parsed = parseXMLTV(await fetchText(src));
+      const parsed = parseXMLTV(await fetchText(src, undefined, XMLTV_TTL));
       return sendJSON(res, 200, {
         channelCount: Object.keys(parsed.channels).length,
         programCount: Object.values(parsed.programs).reduce((a, l) => a + l.length, 0),
@@ -410,8 +445,8 @@ const server = http.createServer(async (req, res) => {
     if (p === '/match' && req.method === 'POST') {
       const { m3u, xmltv } = parseJSON(await readBody(req));
       if (!m3u || !xmltv) throw Object.assign(new Error('m3u and xmltv are required'), { status: 400 });
-      const playlist = parseM3U(await fetchText(m3u));
-      const guide = parseXMLTV(await fetchText(xmltv));
+      const playlist = parseM3U(await fetchText(m3u, undefined, M3U_TTL));
+      const guide = parseXMLTV(await fetchText(xmltv, undefined, XMLTV_TTL));
       const stats = matchChannels(playlist.channels, guide);
       const matched = playlist.channels.filter(c => c.epg).length;
       return sendJSON(res, 200, {
@@ -423,9 +458,9 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (p === '/play' && req.method === 'POST') {
-      const { url } = parseJSON(await readBody(req));
+      const { url, name } = parseJSON(await readBody(req));
       if (!url) throw Object.assign(new Error('url is required'), { status: 400 });
-      const r = await playStream(url);
+      const r = await playStream(url, name);
       return sendJSON(res, 200, r);
     }
 
