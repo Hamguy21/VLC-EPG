@@ -1,0 +1,16 @@
+# Lua
+*.luac
+*.lua.bak
+
+# VLC runtime artifacts (created when the extension runs)
+*.cfg
+vlc_epg_cache.txt
+vlc_epg_download.*
+
+# Python
+__pycache__/
+*.pyc
+
+# OS
+.DS_Store
+Thumbs.db

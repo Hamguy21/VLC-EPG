@@ -1,0 +1,11 @@
+#EXTM3U url-tvg="file:///I:/AI/vlc-epg/examples/test_epg.xml"
+#EXTINF:-1 tvg-id="CNN.us@SD" tvg-name="CNN" group-title="News",CNN
+https://stream.example/cnn.m3u8
+#EXTINF:-1 tvg-id="BBC.uk@HD" tvg-name="BBC One HD" group-title="General",BBC One HD
+https://stream.example/bbc.m3u8
+#EXTINF:-1 tvg-id="FOXNZ.us@SD" tvg-name="Fox News" group-title="News",Fox News
+https://stream.example/fox.m3u8
+#EXTINF:-1 tvg-id="Eurosport1.de@HD" tvg-name="Eurosport 1" group-title="Sports",Eurosport 1
+https://stream.example/eurosport.m3u8
+#EXTINF:-1 tvg-id="TLC.uk@SD" tvg-name="TLC" group-title="Lifestyle",TLC
+https://stream.example/tlc.m3u8
