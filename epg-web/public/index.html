@@ -366,6 +366,14 @@ function fmtDate(ms) {
   if (state.dfmt === 'MDY') return `${M}/${D}/${Y}`;
   return `${D}/${M}/${Y}`;
 }
+// Normalize an XMLTV <date> value into a human-readable year string.
+function fmtYear(v) {
+  const s = String(v || '').trim();
+  if (/^\d{8}$/.test(s)) return s.slice(0, 4);          // 20261105 -> 2026
+  if (/^\d{4}$/.test(s)) return s;                       // 2026 -> 2026
+  if (/^\d{4}-\d{2}/.test(s)) return s.slice(0, 4);      // 2026-11-05 -> 2026
+  return s;
+}
 function fmtDateTime(ms) { return fmtDate(ms) + ' ' + fmtTime(ms); }
 function nowProgram(ch, at) {
   for (const p of (ch.programs || [])) {
@@ -767,7 +775,7 @@ function renderMeta(program, channel) {
     if (program.sub) push('Episode', program.sub);
     if (ep && ep.season != null) push('Season', ep.season);
     if (ep && ep.episode != null) push('Episode №', ep.episode);
-    if (program.year) push('Year', program.year);
+    if (program.year) push('Year', fmtYear(program.year));
     if (program.start) push('Date', fmtDate(program.start));
     if (program.rating) push('Rating', program.rating);
     if (program.lang) push('Language', program.lang.toUpperCase());
