@@ -249,6 +249,128 @@ function stopPlay() {
 }
 
 /* ------------------------------------------------------------------ */
+/* Auto XMLTV grabber                                                  */
+/* ------------------------------------------------------------------ */
+// Country/region name -> ISO code for epg.pw per-country guides.
+const COUNTRY_MAP = {
+  // direct country names
+  'australia':'AU','brazil':'BR','canada':'CA','china':'CN','germany':'DE',
+  'france':'FR','united kingdom':'GB','uk':'GB','britain':'GB','great britain':'GB',
+  'hong kong':'HK','indonesia':'ID','india':'IN','japan':'JP','malaysia':'MY',
+  'new zealand':'NZ','philippines':'PH','russia':'RU','singapore':'SG',
+  'taiwan':'TW','united states':'US','usa':'US','america':'US','vietnam':'VN',
+  'south africa':'ZA',
+  // US states
+  'alabama':'US','alaska':'US','arizona':'US','arkansas':'US','california':'US',
+  'colorado':'US','connecticut':'US','delaware':'US','florida':'US','georgia':'US',
+  'hawaii':'US','idaho':'US','illinois':'US','indiana':'US','iowa':'US',
+  'kansas':'US','kentucky':'US','louisiana':'US','maine':'US','maryland':'US',
+  'massachusetts':'US','michigan':'US','minnesota':'US','mississippi':'US',
+  'missouri':'US','montana':'US','nebraska':'US','nevada':'US','new hampshire':'US',
+  'new jersey':'US','new mexico':'US','new york':'US','north carolina':'US',
+  'north dakota':'US','ohio':'US','oklahoma':'US','oregon':'US','pennsylvania':'US',
+  'rhode island':'US','south carolina':'US','south dakota':'US','tennessee':'US',
+  'texas':'US','utah':'US','vermont':'US','virginia':'US','washington':'US',
+  'west virginia':'US','wisconsin':'US','wyoming':'US','district of columbia':'US',
+  // Canadian provinces
+  'alberta':'CA','british columbia':'CA','manitoba':'CA','new brunswick':'CA',
+  'newfoundland':'CA','nova scotia':'CA','ontario':'CA','prince edward island':'CA',
+  'quebec':'CA','saskatchewan':'CA','nunavut':'CA','northwest territories':'CA',
+  'yukon':'CA',
+  // India states / major regions
+  'andhra pradesh':'IN','assam':'IN','bihar':'IN','gujarat':'IN','haryana':'IN',
+  'karnataka':'IN','kerala':'IN','madhya pradesh':'IN','maharashtra':'IN',
+  'orissa':'IN','punjab':'IN','rajasthan':'IN','tamil nadu':'IN','telangana':'IN',
+  'uttar pradesh':'IN','west bengal':'IN','delhi':'IN','mumbai':'IN',
+  // Brazil states
+  'sao paulo':'BR','rio de janeiro':'BR','minas gerais':'BR','bahia':'BR',
+  'parana':'BR','rio grande do sul':'BR','pernambuco':'BR','ceara':'BR',
+  'goias':'BR','amazonas':'BR','espirito santo':'BR','santa catarina':'BR',
+  // others
+  'england':'GB','scotland':'GB','wales':'GB','northern ireland':'GB','ireland':'GB',
+};
+
+// epg.pw guide URLs by ISO code.
+const EPGPW = code => `https://epg.pw/xmltv/epg_${code}.xml.gz`;
+
+const guideCache = new Map(); // code -> { ts, parsed }
+
+function resolveCountry(name) {
+  const key = String(name || '').toLowerCase().trim();
+  return COUNTRY_MAP[key] || null;
+}
+
+function groupCountries(groups) {
+  const set = new Set();
+  for (const g of groups) {
+    const code = resolveCountry(g);
+    if (code) set.add(code);
+    else {
+      // try to match a substring (e.g. "United States of America")
+      const low = g.toLowerCase();
+      for (const [k, v] of Object.entries(COUNTRY_MAP)) {
+        if (k.length > 3 && low.includes(k)) { set.add(v); break; }
+      }
+    }
+  }
+  return [...set];
+}
+
+async function fetchGuide(code) {
+  const cached = guideCache.get(code);
+  const now = Date.now();
+  if (cached && now - cached.ts < 6 * 3600 * 1000) return cached.parsed;
+  const text = await fetchText(EPGPW(code));
+  const parsed = parseXMLTV(text);
+  guideCache.set(code, { ts: now, parsed });
+  return parsed;
+}
+
+async function grabEPG(m3u, requestedCountries) {
+  const playlistText = await fetchText(m3u);
+  const playlist = parseM3U(playlistText);
+
+  // Resolve which per-country guides to pull.
+  let codes;
+  if (Array.isArray(requestedCountries) && requestedCountries.length) {
+    codes = requestedCountries.map(c => resolveCountry(c)).filter(Boolean);
+    codes = [...new Set(codes)];
+  } else {
+    codes = groupCountries(playlist.groupList);
+  }
+  if (!codes.length) {
+    return {
+      total: playlist.channels.length, matched: 0, codes: [],
+      stats: { id: 0, name: 0 }, groups: playlist.groupList,
+      channels: playlist.channels.map(c => ({ ...c, programs: [], epg: null, matchHow: null })),
+    };
+  }
+
+  // Fetch + merge guides.
+  const merged = { channels: {}, programs: {}, nameMap: {} };
+  const failures = [];
+  for (const code of codes) {
+    try {
+      const g = await fetchGuide(code);
+      Object.assign(merged.channels, g.channels);
+      Object.assign(merged.programs, g.programs);
+      Object.assign(merged.nameMap, g.nameMap);
+    } catch (e) {
+      failures.push(code + ':' + e.message.slice(0, 60));
+    }
+  }
+
+  const stats = matchChannels(playlist.channels, merged);
+  const matched = playlist.channels.filter(c => c.epg).length;
+  return {
+    total: playlist.channels.length,
+    matched, codes, failures,
+    stats, groups: playlist.groupList,
+    channels: playlist.channels,
+  };
+}
+
+/* ------------------------------------------------------------------ */
 /* HTTP server                                                         */
 /* ------------------------------------------------------------------ */
 function serveIndex(req, res) {
@@ -308,6 +430,13 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (p === '/stop' && req.method === 'POST') return sendJSON(res, 200, stopPlay());
+
+    if (p === '/grab' && req.method === 'POST') {
+      const { m3u, countries } = parseJSON(await readBody(req));
+      if (!m3u) throw Object.assign(new Error('m3u is required'), { status: 400 });
+      const result = await grabEPG(m3u, countries);
+      return sendJSON(res, 200, result);
+    }
 
     return sendJSON(res, 404, { error: 'not found' });
   } catch (e) {
