@@ -30,7 +30,6 @@
     border-radius:6px; font-size:13px; font-weight:600; cursor:pointer; }
   .btn:hover { background:var(--accent2); }
   .btn.ghost { background:transparent; border:1px solid var(--border); color:var(--text); }
-  .btn.small { padding:4px 9px; font-size:12px; }
   .status { margin-left:auto; color:var(--muted); font-size:12px; max-width:320px; }
   .status.ok { color:#5fd48a; }
   .status.err { color:var(--now); }
@@ -44,6 +43,17 @@
   .bar input[type=text] { width:190px; }
   .bar .hint { color:var(--muted); margin-left:auto; }
 
+  /* now playing bar */
+  .nowbar { display:flex; align-items:center; gap:10px; padding:6px 16px;
+    background:linear-gradient(90deg, #1a2030, #202738); border-bottom:1px solid var(--border);
+    font-size:13px; }
+  .nowbar .pulse { width:10px; height:10px; border-radius:50%; background:var(--now);
+    box-shadow:0 0 0 0 rgba(255,77,94,.6); animation:pulse 1.6s infinite; }
+  @keyframes pulse { 0%{box-shadow:0 0 0 0 rgba(255,77,94,.6)} 70%{box-shadow:0 0 0 8px rgba(255,77,94,0)} 100%{box-shadow:0 0 0 0 rgba(255,77,94,0)} }
+  .nowbar .nb-ch { font-weight:650; }
+  .nowbar .nb-prog { color:var(--text); }
+  .nowbar .nb-time { color:var(--muted); margin-left:auto; }
+
   /* grid stage */
   .stage { flex:1; overflow:auto; position:relative; background:var(--bg); }
   .grid { position:relative; }
@@ -53,15 +63,20 @@
   .ruler .tick { position:absolute; top:0; bottom:0; border-left:1px solid var(--grid);
     font-size:10px; color:var(--muted); padding:2px 4px; white-space:nowrap; }
 
-  .row { position:relative; height:64px; border-bottom:1px solid var(--grid); }
-  .row .ch { position:sticky; left:0; z-index:10; width:220px; height:64px;
+  .row { position:relative; height:72px; border-bottom:1px solid var(--grid); cursor:pointer; }
+  .row:hover { background:rgba(86,115,245,.06); }
+  .row.playing { box-shadow:inset 3px 0 0 var(--accent); }
+  .row .ch { position:sticky; left:0; z-index:10; width:240px; height:72px;
     background:var(--panel); border-right:1px solid var(--border);
     display:flex; align-items:center; gap:8px; padding:6px 8px; }
-  .row .ch img { width:32px; height:32px; object-fit:contain; border-radius:6px; background:#000; }
+  .row .ch img { width:30px; height:30px; object-fit:contain; border-radius:6px; background:#000; }
   .row .ch .cinfo { min-width:0; flex:1; }
-  .row .ch .name { font-size:12.5px; font-weight:600; line-height:1.2;
-    display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
-  .row .ch .group { font-size:10px; color:var(--muted); }
+  .row .ch .name { font-size:12.5px; font-weight:600; line-height:1.15;
+    display:-webkit-box; -webkit-line-clamp:1; -webkit-box-orient:vertical; overflow:hidden; }
+  .row .ch .nowprog { font-size:10.5px; color:var(--accent2); white-space:nowrap; overflow:hidden;
+    text-overflow:ellipsis; }
+  .row .ch .nowprog .t { color:var(--muted); }
+  .row .ch .group { font-size:9.5px; color:var(--muted); }
   .row .ch .star { cursor:pointer; font-size:18px; color:var(--muted); user-select:none;
     background:none; border:none; padding:0 2px; line-height:1; }
   .row .ch .star.on { color:var(--star); }
@@ -77,6 +92,8 @@
     text-overflow:ellipsis; }
   .prog .d { font-size:10.5px; color:var(--muted); white-space:nowrap; overflow:hidden;
     text-overflow:ellipsis; }
+  .prog.noinfo { border-style:dashed; border-left:3px dashed var(--muted);
+    background:transparent; color:var(--muted); display:flex; align-items:center; font-size:11px; }
 
   .nowline { position:absolute; top:0; bottom:0; width:2px; background:var(--now);
     z-index:5; pointer-events:none; }
@@ -93,6 +110,17 @@
     border-radius:50%; animation:sp 1s linear infinite; }
   @keyframes sp { to { transform:rotate(360deg); } }
 
+  /* details panel */
+  .details { position:absolute; right:16px; bottom:16px; width:340px; max-width:80%;
+    background:var(--panel); border:1px solid var(--border); border-radius:10px;
+    padding:14px 16px; z-index:60; box-shadow:0 8px 30px rgba(0,0,0,.5); }
+  .details .d-title { font-size:15px; font-weight:650; margin-bottom:2px; }
+  .details .d-sub { font-size:12px; color:var(--muted); margin-bottom:8px; }
+  .details .d-time { font-size:12px; color:var(--accent2); margin-bottom:6px; }
+  .details .d-desc { font-size:12.5px; color:var(--text); max-height:120px; overflow:auto; }
+  .details .d-row { display:flex; gap:8px; margin-top:10px; }
+  .details .d-row .btn { flex:1; }
+
   .toast { position:fixed; bottom:20px; left:50%; transform:translateX(-50%);
     background:#222a38; border:1px solid var(--border); padding:10px 18px; border-radius:8px;
     font-size:13px; z-index:100; opacity:0; transition:opacity .2s; pointer-events:none; }
@@ -103,68 +131,71 @@
 <div class="app">
   <div class="top">
     <h1>▦ VLC EPG<span class="sub">TV guide</span></h1>
-    <div class="field">
-      <label>M3U playlist</label>
-      <input id="m3u" placeholder="https://iptv-org.github.io/iptv/index.m3u">
-    </div>
-    <div class="field">
-      <label>XMLTV EPG</label>
-      <input id="xmltv" placeholder="https://…/epg.xml (empty → auto-find in playlist header)">
-    </div>
+    <div class="field"><label>M3U playlist</label>
+      <input id="m3u" placeholder="https://iptv-org.github.io/iptv/index.m3u"></div>
+    <div class="field"><label>XMLTV EPG</label>
+      <input id="xmltv" placeholder="https://…/epg.xml (empty → auto-find in playlist header)"></div>
     <button class="btn" id="load">Load guide</button>
     <button class="btn ghost" id="sample">Sample</button>
     <button class="btn ghost" id="saveSrc" title="Save these sources">Save</button>
-    <div class="field">
-      <label>Saved sources</label>
-      <select id="saved"><option value="">— none —</option></select>
-    </div>
+    <div class="field"><label>Saved sources</label>
+      <select id="saved"><option value="">— none —</option></select></div>
     <div class="status" id="status">Enter a playlist + EPG, or load the sample.</div>
   </div>
 
+  <div class="nowbar" id="nowbar" style="display:none">
+    <span class="pulse"></span>
+    <span class="nb-ch" id="nbCh"></span>
+    <span class="nb-prog" id="nbProg">▶</span>
+    <span class="nb-time" id="nbTime"></span>
+  </div>
+
   <div class="bar">
-    <span class="grp">Group:</span>
-    <select id="group"><option value="">All channels</option></select>
+    <span class="grp">Group:</span><select id="group"><option value="">All channels</option></select>
     <span class="grp">Filter:</span>
     <select id="filter">
       <option value="all" selected>All</option>
       <option value="fav">Favorites</option>
       <option value="epg">With EPG</option>
     </select>
-    <span class="grp">Search:</span>
-    <input type="text" id="q" placeholder="channel or program…">
+    <span class="grp">Search:</span><input type="text" id="q" placeholder="channel or program…">
     <span class="grp">Window:</span>
     <select id="window">
-      <option value="2">±2 h</option>
-      <option value="3" selected>±3 h</option>
-      <option value="6">±6 h</option>
-      <option value="12">±12 h</option>
+      <option value="2">±2 h</option><option value="3" selected>±3 h</option>
+      <option value="6">±6 h</option><option value="12">±12 h</option>
     </select>
-    <span class="hint">click a program to play it in VLC · ★ = favorite</span>
+    <span class="hint">click a channel or program to watch · ★ = favorite</span>
   </div>
 
   <div class="stage" id="stage">
     <div class="placeholder"><div class="big">📺</div>
-      <div>EPG grid appears here</div>
-    </div>
+      <div>EPG grid appears here</div></div>
   </div>
 </div>
+
+<div class="details" id="details" style="display:none">
+  <div class="d-title" id="dTitle"></div>
+  <div class="d-sub" id="dSub"></div>
+  <div class="d-time" id="dTime"></div>
+  <div class="d-desc" id="dDesc"></div>
+  <div class="d-row">
+    <button class="btn" id="dPlay">▶ Play</button>
+    <button class="btn ghost" id="dClose">Close</button>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script>
 const $ = id => document.getElementById(id);
 const stage = $('stage');
-const state = { channels: [], groups: [], now: Date.now(), fav: new Set() };
+const state = { channels: [], groups: [], now: Date.now(), fav: new Set(), current: null };
 let timer = null;
-
 const LS_SOURCES = 'vlcEpgSources';
 const LS_FAV = 'vlcEpgFavorites';
 
-function loadFav() {
-  try { state.fav = new Set(JSON.parse(localStorage.getItem(LS_FAV) || '[]')); } catch (_) {}
-}
-function saveFav() {
-  localStorage.setItem(LS_FAV, JSON.stringify([...state.fav]));
-}
+function loadFav() { try { state.fav = new Set(JSON.parse(localStorage.getItem(LS_FAV) || '[]')); } catch (_) {} }
+function saveFav() { localStorage.setItem(LS_FAV, JSON.stringify([...state.fav])); }
 
 function toast(msg, isErr) {
   const t = $('toast'); t.textContent = msg; t.classList.add('show');
@@ -179,58 +210,50 @@ async function post(path, body) {
   return j;
 }
 function setStatus(text, kind) {
-  const s = $('status'); s.textContent = text;
-  s.className = 'status ' + (kind || '');
+  const s = $('status'); s.textContent = text; s.className = 'status ' + (kind || '');
 }
 function escapeHtml(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
     ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
+function fmtTime(ms) {
+  const d = new Date(ms);
+  return d.getHours().toString().padStart(2,'0') + ':' + d.getMinutes().toString().padStart(2,'0');
+}
+function nowProgram(ch, at) {
+  for (const p of (ch.programs || [])) {
+    if (p.start <= at && p.stop > at) return p;
+    if (p.start > at) break;
+  }
+  return null;
+}
 
-/* ---------- sources (save / remove / auto-find) ---------- */
-function savedSources() {
-  try { return JSON.parse(localStorage.getItem(LS_SOURCES) || '[]'); } catch (_) { return []; }
-}
-function writeSources(list) {
-  localStorage.setItem(LS_SOURCES, JSON.stringify(list));
-}
+/* ---------- sources ---------- */
+function savedSources() { try { return JSON.parse(localStorage.getItem(LS_SOURCES) || '[]'); } catch (_) { return []; } }
+function writeSources(list) { localStorage.setItem(LS_SOURCES, JSON.stringify(list)); }
 function refreshSavedDropdown(selectedName) {
-  const dd = $('saved');
-  const list = savedSources();
+  const dd = $('saved'); const list = savedSources();
   dd.innerHTML = '<option value="">— none —</option>' + list.map(s =>
     `<option ${s.name === selectedName ? 'selected' : ''}>${escapeHtml(s.name)}</option>`).join('');
   dd.onchange = () => {
-    const name = dd.value;
-    if (!name) return;
-    const s = list.find(x => x.name === name);
-    if (s) {
-      $('m3u').value = s.m3u;
-      $('xmltv').value = s.xmltv || '';
-      loadGuide();
-    }
+    const s = list.find(x => x.name === dd.value);
+    if (s) { $('m3u').value = s.m3u; $('xmltv').value = s.xmltv || ''; loadGuide(); }
   };
 }
 $('saveSrc').addEventListener('click', () => {
   const m3u = $('m3u').value.trim();
   if (!m3u) { toast('Enter a playlist first', true); return; }
-  const xmltv = $('xmltv').value.trim();
-  const name = prompt('Name this saved source:', (m3u.split('/').pop().split('?')[0] || 'source').slice(0, 40));
+  const name = prompt('Name this saved source:', (m3u.split('/').pop().split('?')[0] || 'source').slice(0,40));
   if (!name) return;
   const list = savedSources().filter(s => s.name !== name);
-  list.push({ name, m3u, xmltv });
-  writeSources(list);
-  refreshSavedDropdown(name);
-  toast('Saved: ' + name);
+  list.push({ name, m3u, xmltv: $('xmltv').value.trim() });
+  writeSources(list); refreshSavedDropdown(name); toast('Saved: ' + name);
 });
-// remove current selection (double-click saved dropdown)
 $('saved').addEventListener('dblclick', () => {
-  const dd = $('saved');
-  const name = dd.value;
+  const name = $('saved').value;
   if (!name) return;
-  const list = savedSources().filter(s => s.name !== name);
-  writeSources(list);
-  refreshSavedDropdown('');
-  toast('Removed: ' + name);
+  writeSources(savedSources().filter(s => s.name !== name));
+  refreshSavedDropdown(''); toast('Removed: ' + name);
 });
 
 /* ---------- loaders ---------- */
@@ -243,29 +266,25 @@ async function loadGuide() {
   try {
     let guide = xmltv;
     const m = await post('/parse/m3u', { src: m3u });
-    if (!guide && m.headerEpg) {
-      guide = m.headerEpg;            // auto-find EPG from playlist header
-      $('xmltv').value = guide;
-    }
+    if (!guide && m.headerEpg) { guide = m.headerEpg; $('xmltv').value = guide; }
     if (!guide) {
       state.channels = m.channels.map(c => ({ ...c, programs: [], epg: null, matchHow: null }));
       state.groups = m.groupList;
       render();
-      setStatus(m.channels.length + ' channels loaded (no EPG source auto-found).');
+      setStatus(m.channels.length + ' channels loaded (no EPG source auto-found). Click a channel to play.');
       return;
     }
     const match = await post('/match', { m3u, xmltv: guide });
     state.channels = match.channels;
     state.groups = match.groups;
     render();
+    const withEpg = match.channels.filter(c => c.epg).length;
     setStatus(match.channels.length + ' channels · ' + match.matched + ' with EPG (' +
-      match.stats.id + ' by id, ' + match.stats.name + ' by name).');
+      match.stats.id + ' by id, ' + match.stats.name + ' by name). Click any channel to play.');
   } catch (e) {
     setStatus('Failed: ' + e.message, 'err');
     toast('Load failed: ' + e.message, true);
-  } finally {
-    showLoading(false);
-  }
+  } finally { showLoading(false); }
 }
 
 async function sample() {
@@ -280,8 +299,7 @@ function showLoading(on) {
   if (on) {
     if (el) return;
     el = document.createElement('div'); el.className = 'loading';
-    el.innerHTML = '<div style="display:flex;gap:10px;align-items:center">' +
-      '<div class="spin"></div> Loading…</div>';
+    el.innerHTML = '<div style="display:flex;gap:10px;align-items:center"><div class="spin"></div> Loading…</div>';
     stage.appendChild(el);
   } else if (el) el.remove();
 }
@@ -291,13 +309,11 @@ function buildRuler(halfHours, pxPerHour, now) {
   for (let h = -halfHours; h <= halfHours; h++) {
     const t = new Date(now + h * 3600e3);
     const left = (h + halfHours) * pxPerHour;
-    const label = t.getHours().toString().padStart(2,'0') + ':' +
-      t.getMinutes().toString().padStart(2,'0');
+    const label = t.getHours().toString().padStart(2,'0') + ':' + t.getMinutes().toString().padStart(2,'0');
     html += `<div class="tick" style="left:${left}px">${label}</div>`;
   }
   return html + '</div>';
 }
-
 function favKey(ch) { return ch.tvg_id || ch.name; }
 
 function render() {
@@ -308,39 +324,29 @@ function render() {
   const start = now - halfHours * 3600e3;
   const end = now + halfHours * 3600e3;
 
-  // --- filters ---
   const selGroup = $('group').value;
   const filterMode = $('filter').value;
   const q = $('q').value.trim().toLowerCase();
-
   let channels = state.channels;
   if (selGroup) channels = channels.filter(c => c.group === selGroup);
   if (filterMode === 'fav') channels = channels.filter(c => state.fav.has(favKey(c)));
   if (filterMode === 'epg') channels = channels.filter(c => c.epg);
-
-  // search: match channel name OR any program title in window
   if (q) {
-    channels = channels.filter(c => {
-      if (c.name.toLowerCase().includes(q)) return true;
-      return (c.programs || []).some(p => p.title.toLowerCase().includes(q));
-    });
+    channels = channels.filter(c => c.name.toLowerCase().includes(q) ||
+      (c.programs || []).some(p => p.title.toLowerCase().includes(q)));
   }
 
-  // group dropdown (recompute from full state, preserve selection)
   const grp = $('group');
   grp.innerHTML = '<option value="">All channels</option>' +
     state.groups.map(g => `<option ${g===selGroup?'selected':''}>${escapeHtml(g)}</option>`).join('');
 
-  // channel dropdown (jump) in the toolbar
   const chSel = $('chSel');
   if (chSel) {
     chSel.innerHTML = '<option value="">Jump to channel…</option>' + channels.map((c,i) =>
       `<option value="${i}">${escapeHtml(c.name)}</option>`).join('');
     chSel.onchange = () => {
       const i = parseInt(chSel.value, 10);
-      if (isNaN(i)) return;
-      const el = document.getElementById('row-' + i);
-      if (el) { el.scrollIntoView({ block: 'nearest' }); chSel.value = ''; }
+      if (!isNaN(i)) { const el = document.getElementById('row-' + i); if (el) { el.scrollIntoView({block:'nearest'}); chSel.value=''; } }
     };
   }
 
@@ -349,28 +355,35 @@ function render() {
 
   channels.forEach((ch, idx) => {
     const isFav = state.fav.has(favKey(ch));
-    html += '<div class="row" id="row-' + idx + '">';
+    const np = nowProgram(ch, now);
+    const isPlaying = state.current && state.current.url === ch.url;
+
+    html += '<div class="row' + (isPlaying ? ' playing' : '') + '" id="row-' + idx + '">';
     html += '<div class="ch">';
     if (ch.logo) html += `<img src="${escapeHtml(ch.logo)}" loading="lazy" onerror="this.style.display='none'">`;
     html += '<div class="cinfo">';
     html += '<div class="name">' + escapeHtml(ch.name) + '</div>';
+    if (np) html += `<div class="nowprog"><span class="t">${fmtTime(np.start)}–${fmtTime(np.stop)}</span> ${escapeHtml(np.title)}</div>`;
+    else if (ch.epg) html += '<div class="nowprog" style="color:var(--muted)">no program at this time</div>';
+    else html += '<div class="nowprog" style="color:var(--muted)">no EPG info</div>';
     if (ch.group) html += `<div class="group">${escapeHtml(ch.group)}</div>`;
     html += '</div>';
     html += `<button class="star ${isFav?'on':''}" data-idx="${idx}" title="Favorite">★</button>`;
     html += '</div>'; // ch
 
     const progs = (ch.programs || []).filter(p => p.stop > start && p.start < end);
+    if (progs.length === 0) {
+      html += `<div class="prog noinfo" style="left:0px;width:${totalW}px">${ch.epg ? 'No program in this window' : 'No EPG data — click the channel to play anyway'}</div>`;
+    }
     for (const p of progs) {
       const left = Math.max(0, (p.start - start) / 3600e3) * pxPerHour;
       const right = Math.min(totalW, (p.stop - start) / 3600e3) * pxPerHour;
       const w = right - left;
       if (w < 6) continue;
       const isNow = p.start <= now && p.stop > now;
-      const t0 = new Date(p.start), t1 = new Date(p.stop);
-      const hh = n => n.toString().padStart(2,'0');
-      const tl = `${hh(t0.getHours())}:${hh(t0.getMinutes())}–${hh(t1.getHours())}:${hh(t1.getMinutes())}`;
+      const tl = `${fmtTime(p.start)}–${fmtTime(p.stop)}`;
       html += `<div class="prog ${isNow?'now':''}" style="left:${left}px;width:${w}px" ` +
-        `data-url="${escapeHtml(ch.url)}" data-tt="${escapeHtml(p.title)}">` +
+        `data-idx="${idx}" data-tt="${escapeHtml(p.title)}" data-desc="${escapeHtml(p.desc||'')}" data-cat="${escapeHtml(p.cat||'')}" data-start="${p.start}" data-stop="${p.stop}">` +
         `<div class="t">${tl}</div>` +
         `<div class="tt">${escapeHtml(p.title)}</div>` +
         (p.cat ? `<div class="d">${escapeHtml(p.cat)}</div>` : '') +
@@ -382,29 +395,41 @@ function render() {
 
   const nowLeft = halfHours * pxPerHour;
   html += `<div class="nowline" style="left:${nowLeft}px"></div>`;
-
   stage.innerHTML = html;
   stage.scrollLeft = Math.max(0, nowLeft - stage.clientWidth / 2);
 
-  // play clicks
-  stage.querySelectorAll('.prog').forEach(el => {
-    el.addEventListener('click', () => {
-      const url = el.dataset.url;
-      Promise.resolve(post('/play', { url }))
-        .then(() => toast('▶ ' + el.dataset.tt))
-        .catch(e => toast('Play failed: ' + e.message, true));
+  // click channel row -> play (unless clicking star)
+  stage.querySelectorAll('.row').forEach((row) => {
+    row.addEventListener('click', (e) => {
+      if (e.target.closest('.star')) return;
+      const idx = parseInt(row.id.split('-')[1], 10);
+      const ch = channels[idx];
+      if (!ch) return;
+      playChannel(ch);
     });
   });
 
-  // favorite toggles
+  // click program -> details panel
+  stage.querySelectorAll('.prog:not(.noinfo)').forEach(el => {
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const idx = parseInt(el.dataset.idx, 10);
+      const ch = channels[idx];
+      showDetails(ch, {
+        title: el.dataset.tt, desc: el.dataset.desc, cat: el.dataset.cat,
+        start: parseInt(el.dataset.start,10), stop: parseInt(el.dataset.stop,10)
+      });
+    });
+  });
+
   stage.querySelectorAll('.star').forEach(el => {
-    el.addEventListener('click', () => {
-      const ch = channels[parseInt(el.dataset.idx, 10)];
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const ch = channels[parseInt(el.dataset.idx,10)];
       if (!ch) return;
       const k = favKey(ch);
       if (state.fav.has(k)) state.fav.delete(k); else state.fav.add(k);
-      saveFav();
-      render();
+      saveFav(); render();
       toast(state.fav.has(k) ? '★ Added to favorites' : 'Removed from favorites');
     });
   });
@@ -414,6 +439,39 @@ function render() {
     const nl = stage.querySelector('.nowline');
     if (nl) nl.style.left = ($('window').value * 240) + 'px';
   }, 60000);
+}
+
+/* ---------- play + details ---------- */
+function playChannel(ch) {
+  if (!ch || !ch.url) { toast('No stream URL for this channel', true); return; }
+  state.current = { url: ch.url, name: ch.name };
+  render();
+  Promise.resolve(post('/play', { url: ch.url }))
+    .then(() => {
+      updateNowBar(ch);
+      toast('▶ ' + ch.name);
+    })
+    .catch(e => toast('Play failed: ' + e.message, true));
+}
+
+function updateNowBar(ch) {
+  const bar = $('nowbar');
+  bar.style.display = 'flex';
+  $('nbCh').textContent = ch.name;
+  const np = nowProgram(ch, Date.now());
+  $('nbProg').textContent = np ? ('Now: ' + np.title) : '▶ playing';
+  $('nbTime').textContent = np ? (fmtTime(np.start) + '–' + fmtTime(np.stop)) : '';
+}
+
+function showDetails(ch, p) {
+  const d = $('details');
+  $('dTitle').textContent = p.title || ch.name;
+  $('dSub').textContent = ch.name + (p.cat ? ' · ' + p.cat : '');
+  $('dTime').textContent = (p.start && p.stop) ? (fmtTime(p.start) + ' – ' + fmtTime(p.stop)) : '';
+  $('dDesc').textContent = p.desc || 'No synopsis available.';
+  d.style.display = 'block';
+  $('dPlay').onclick = () => { d.style.display='none'; playChannel(ch); };
+  $('dClose').onclick = () => { d.style.display = 'none'; };
 }
 
 /* events */
@@ -426,11 +484,9 @@ $('window').addEventListener('change', () => { if (state.channels.length) render
 $('m3u').addEventListener('keydown', e => { if (e.key === 'Enter') loadGuide(); });
 $('xmltv').addEventListener('keydown', e => { if (e.key === 'Enter') loadGuide(); });
 
-// add a channel-jump dropdown to the toolbar if not present
 (function ensureChSel() {
   const bar = document.querySelector('.bar');
-  const existing = document.getElementById('chSel');
-  if (existing || !bar) return;
+  if (document.getElementById('chSel') || !bar) return;
   const wrap = document.createElement('span');
   wrap.innerHTML = '<span class="grp">Channel:</span><select id="chSel" style="max-width:200px"><option value="">Jump…</option></select>';
   bar.insertBefore(wrap, bar.querySelector('.hint'));
