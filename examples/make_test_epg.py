@@ -50,14 +50,23 @@ def main():
         f.write('<!DOCTYPE tv SYSTEM "xmltv.dtd">\n')
         f.write('<tv generator-info-name="test">\n')
         for tvg_id, name, group, url in channels:
-            f.write(f'  <channel id="{tvg_id}"><display-name>{name}</display-name></channel>\n')
+            f.write(f'  <channel id="{tvg_id}"><display-name>{name}</display-name>')
+            f.write(f'<icon src="https://picsum.photos/seed/{tvg_id}/400/225"/></channel>\n')
         # 3 programs per channel: one running, two upcoming
         for tvg_id, name, group, url in channels:
             shows_list = shows[tvg_id]
             start = now - datetime.timedelta(minutes=30)
-            for title, cat, desc in shows_list:
+            for i, (title, cat, desc) in enumerate(shows_list):
                 stop = start + datetime.timedelta(minutes=60)
                 f.write(f'  <programme start="{fmt(start)}" stop="{fmt(stop)}" channel="{tvg_id}">\n')
+                if i == 0:
+                    f.write(f'    <icon src="https://picsum.photos/seed/{tvg_id}-{i}/400/225"/>\n')
+                    f.write(f'    <sub-title lang="en">Episode One</sub-title>\n')
+                    f.write(f'    <episode-num system="xmltv_ns">1.2.</episode-num>\n')
+                    f.write(f'    <date>2024</date>\n')
+                    f.write(f'    <rating system="VCHIP"><value>TV-PG</value></rating>\n')
+                    f.write(f'    <credits><director>Jane Doe</director><actor>John Smith</actor><actor>Alice Brown</actor></credits>\n')
+                    f.write(f'    <audio><stereo>stereo</stereo><languages>English,Spanish</languages></audio>\n')
                 f.write(f'    <title lang="en">{title}</title>\n')
                 f.write(f'    <category lang="en">{cat}</category>\n')
                 if desc:
