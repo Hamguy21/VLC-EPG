@@ -732,8 +732,18 @@ function updateNowBar(ch) {
   $('nbTime').textContent = np ? (fmtTime(np.start) + '–' + fmtTime(np.stop)) : '';
 }
 
-function openDetails() { $('details').classList.add('open'); }
-function closeDetails() { $('details').classList.remove('open'); }
+function openDetails() {
+  $('details').classList.add('open');
+  // Reserve room below the grid (plus a small buffer) so the last rows can
+  // scroll fully clear of the drawer.
+  const g = stage.querySelector('.grid');
+  if (g) g.style.marginBottom = ($('details').offsetHeight + 40) + 'px';
+}
+function closeDetails() {
+  $('details').classList.remove('open');
+  const g = stage.querySelector('.grid');
+  if (g) g.style.marginBottom = '';
+}
 
 // Parse xmltv_ns episode-num ("S.E" or "S.E/P") into {season, episode}.
 function parseEpisode(program) {
@@ -858,6 +868,11 @@ stage.addEventListener('wheel', (e) => {
 
 // ---- Remote / keyboard navigation (TV-style) ----
 function rowHeight() { return document.body.classList.contains('tv') ? 96 : 72; }
+function rulerHeight() { return document.body.classList.contains('tv') ? 42 : 34; }
+function drawerHeight() {
+  const d = $('details');
+  return d.classList.contains('open') ? d.offsetHeight : 0;
+}
 function selectAt(idx) {
   if (!state.view.length) return;
   if (idx < 0) idx = 0;
@@ -869,9 +884,11 @@ function selectAt(idx) {
   if (row) {
     row.classList.add('selected');
     // Vertically scroll via arithmetic (uniform row height) — no DOM layout reads.
+    // Reserve the open drawer's height so the selected channel stays visible
+    // above the description panel. Rows begin below the ruler, so add its height.
     const h = rowHeight();
-    const top = idx * h;
-    const vh = stage.clientHeight;
+    const top = rulerHeight() + idx * h;
+    const vh = Math.max(0, stage.clientHeight - drawerHeight());
     if (top < stage.scrollTop) stage.scrollTop = top - 8;
     else if (top + h > stage.scrollTop + vh) stage.scrollTop = top + h - vh + 8;
   }
