@@ -585,11 +585,11 @@ function showLoading(on) {
   } else if (el) el.remove();
 }
 
-function buildRuler(halfHours, pxPerHour, now, width) {
+function buildRuler(halfHours, pxPerHour, now, width, chW) {
   let html = `<div class="ruler" style="width:${width}px">`;
   for (let h = -halfHours; h <= halfHours; h++) {
     const t = new Date(now + h * 3600e3);
-    const left = (h + halfHours) * pxPerHour;
+    const left = chW + (h + halfHours) * pxPerHour;
     const label = t.getHours().toString().padStart(2,'0') + ':' + t.getMinutes().toString().padStart(2,'0');
     html += `<div class="tick" style="left:${left}px">${label}</div>`;
   }
@@ -600,13 +600,13 @@ function favKey(ch) { return ch.tvg_id || ch.name; }
 function render() {
   const now = Date.now();
   const halfHours = parseInt($('window').value, 10);
-  // Stretch the timeline to fill the full grid area, so program blocks use
-  // all available width instead of stopping partway across a wide screen.
+  // The sticky channel column occupies the left 240px; the timeline starts to
+  // its right so programs never render underneath (and are hidden by) it.
+  const CH_W = 240;
   const minPxPerHour = 240;
-  const nominalW = halfHours * 2 * minPxPerHour;
-  const availW = stage.clientWidth;
-  const pxPerHour = Math.max(minPxPerHour, nominalW >= availW ? minPxPerHour : availW / (halfHours * 2));
-  const totalW = halfHours * 2 * pxPerHour;
+  const availTimeline = Math.max(0, stage.clientWidth - CH_W);
+  const pxPerHour = Math.max(minPxPerHour, availTimeline / (halfHours * 2));
+  const totalW = CH_W + halfHours * 2 * pxPerHour;
   const start = now - halfHours * 3600e3;
   const end = now + halfHours * 3600e3;
 
@@ -629,7 +629,7 @@ function render() {
   state.view = channels;
   if (state.sel != null && state.sel >= channels.length) state.sel = channels.length - 1;
 
-  let html = buildRuler(halfHours, pxPerHour, now, totalW);
+  let html = buildRuler(halfHours, pxPerHour, now, totalW, CH_W);
   html += '<div class="grid" style="width:' + totalW + 'px">';
 
   channels.forEach((ch, idx) => {
@@ -657,8 +657,8 @@ function render() {
       html += `<div class="prog noinfo" style="left:${CH_W}px;width:${totalW - CH_W}px">${ch.epg ? 'No program in this window' : 'No EPG data — click the channel to play anyway'}</div>`;
     }
     for (const p of progs) {
-      const left = Math.max(0, (p.start - start) / 3600e3) * pxPerHour;
-      const right = Math.min(totalW, (p.stop - start) / 3600e3) * pxPerHour;
+      const left = CH_W + Math.max(0, (p.start - start) / 3600e3) * pxPerHour;
+      const right = Math.min(totalW, CH_W + (p.stop - start) / 3600e3) * pxPerHour;
       const w = right - left;
       if (w < 6) continue;
       const isNow = p.start <= now && p.stop > now;
@@ -674,7 +674,7 @@ function render() {
   });
 
   // now-line must live inside the grid so it spans the full content height
-  const nowLeft = halfHours * pxPerHour;
+  const nowLeft = CH_W + halfHours * pxPerHour;
   html += `<div class="nowline" style="left:${nowLeft}px"></div>`;
   html += '</div>'; // grid
 
