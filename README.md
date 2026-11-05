@@ -82,6 +82,19 @@ lua tests/run_integration.lua src/vlc_epg.lua examples/test.m3u examples/test_ep
 
 Syntax check: `luac -p src/vlc_epg.lua`.
 
+## VLC EPG Web UI (Jellyfin-style grid)
+
+VLC 3.0's native Lua dialogs cannot render an interactive EPG grid. A
+companion web app (`epg-web/`) provides a Jellyfin-style guide — channel
+logos/names, a time axis, colored program blocks, a live "now" line — and
+plays the selected channel in VLC:
+
+```
+cd epg-web && node server.js    # → http://127.0.0.1:8123
+```
+
+See `epg-web/README.md` for details.
+
 ## How it works
 
 - **`parse_m3u_lines`** — streaming M3U parser (pure, line-iterator based).
