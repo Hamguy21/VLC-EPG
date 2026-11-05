@@ -1040,11 +1040,14 @@ end
 
 function activate()
   load_config()
-  create_dialog()
-  -- Auto-open the Jellyfin-style Web EPG in the browser.
+  -- Launch the Jellyfin-style Web EPG (starts the server if needed) — this
+  -- is now the primary UI; the legacy playlist dialog is not shown.
   local ok, msg = launch_web()
-  if ui.status then
-    ui.status:set_text(ok and ("Web EPG opened: " .. msg) or ("Web launch failed: " .. tostring(msg)))
+  if not ok then
+    -- fall back to the dialog only if the web UI is unavailable
+    ui.status = nil
+    create_dialog()
+    if ui.status then ui.status:set_text("Web launch failed: " .. tostring(msg)) end
   end
 end
 
