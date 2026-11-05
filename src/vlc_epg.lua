@@ -1040,7 +1040,7 @@ end
 
 function activate()
   load_config()
-  -- Launch the Jellyfin-style Web EPG (starts the server if needed) — this
+  -- Launch the Web EPG (starts the server if needed) — this
   -- is now the primary UI; the legacy playlist dialog is not shown.
   local ok, msg = launch_web()
   if not ok then

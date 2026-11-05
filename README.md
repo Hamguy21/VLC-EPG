@@ -82,10 +82,10 @@ lua tests/run_integration.lua src/vlc_epg.lua examples/test.m3u examples/test_ep
 
 Syntax check: `luac -p src/vlc_epg.lua`.
 
-## VLC EPG Web UI (Jellyfin-style grid)
+## VLC EPG Web UI (grid)
 
 VLC 3.0's native Lua dialogs cannot render an interactive EPG grid. A
-companion web app (`epg-web/`) provides a Jellyfin-style guide — channel
+companion web app (`epg-web/`) provides a TV-guide grid — channel
 logos/names, a time axis, colored program blocks, a live "now" line — and
 plays the selected channel in VLC:
 

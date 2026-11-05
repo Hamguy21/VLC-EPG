@@ -1,6 +1,6 @@
-# VLC EPG Web UI (Jellyfin-style guide)
+# VLC EPG Web UI (TV guide)
 
-A companion web app that renders a **Jellyfin-style EPG grid** and controls
+A companion web app that renders an **EPG grid** and controls
 VLC playback. VLC 3.0's native Lua dialogs cannot render an interactive grid
 (their HTML widget is a static label), so the guide is a local web UI that
 talks to VLC on the same machine.

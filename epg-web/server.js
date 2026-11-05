@@ -1,5 +1,5 @@
 /**
- * VLC EPG Web UI — Jellyfin-style EPG grid companion.
+ * VLC EPG Web UI — EPG grid companion.
  *
  * A zero-dependency Node server that:
  *   - serves a single-page EPG grid UI
