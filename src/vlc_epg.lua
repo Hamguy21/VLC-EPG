@@ -46,6 +46,11 @@ local DISPLAY_OPTIONS = {
 }
 local DEFAULT_DISPLAY = 3
 
+-- Location of the companion web UI (Node server). Overridable in config.
+local DEFAULT_WEB_DIR = "I:/AI/vlc-epg/epg-web"
+local WEB_PORT = 8123
+local WEB_URL = "http://127.0.0.1:" .. WEB_PORT
+
 -- Built lazily (not at load time): VLC's extension *scan* runs the script in
 -- a bare Lua state with no standard library, so top-level code must not call
 -- functions like ipairs(). Runtime environment has the full library.
@@ -67,6 +72,7 @@ end
 local state = {
   m3u = "",
   epg = "",
+  web_dir = DEFAULT_WEB_DIR,
   header_epg = nil,
   channels = {},
   groups = {},
@@ -290,6 +296,7 @@ local function load_config()
     local k, v = line:match("^([%w_]+)=(.*)$")
     if k == "m3u" then state.m3u = trim(v) end
     if k == "epg" then state.epg = trim(v) end
+    if k == "web_dir" and v ~= "" then state.web_dir = trim(v) end
     if k == "display" then
       local id = tonumber(v)
       if id and display_by_id()[id] then state.display = id end
@@ -303,6 +310,7 @@ local function save_config()
   if not f then return false end
   f:write("m3u=", state.m3u, "\n")
   f:write("epg=", state.epg, "\n")
+  f:write("web_dir=", state.web_dir, "\n")
   f:write("display=", state.display, "\n")
   f:close()
   return true
@@ -956,7 +964,64 @@ local function create_dialog()
   end
   d:add_button("Load into playlist", on_load, 1, 7, 4, 1)
   d:add_button("Re-download guide", on_refresh, 5, 7, 4, 1)
+  d:add_button("Open Web EPG", on_open_web, 1, 8, 4, 1)
+  d:add_button("Stop Web server", on_stop_web, 5, 8, 4, 1)
   d:update()
+end
+
+-----------------------------------------------------------------------------
+-- Web UI launcher
+-----------------------------------------------------------------------------
+local function web_running()
+  local tmp = native_path(data_path("vlc_web_probe.txt"))
+  os.remove(tmp)
+  run_shell('netstat -ano | findstr ":' .. WEB_PORT .. '" | findstr LISTENING > "' .. tmp .. '"')
+  local f = io.open(tmp, "r")
+  local line = f and f:read("*l") or ""
+  if f then f:close() end
+  os.remove(tmp)
+  return line ~= ""
+end
+
+local function launch_web()
+  local dir = native_path(state.web_dir)
+  local srv = dir .. "\\server.js"
+  local f = io.open(srv, "r")
+  if not f then
+    return false, "web UI not found at " .. state.web_dir .. " (set web_dir in vlc_epg.cfg)"
+  end
+  f:close()
+
+  if not web_running() then
+    if is_windows() then
+      run_shell('start "" /D "' .. dir .. '" cmd /c "node server.js"')
+    else
+      run_shell('cd "' .. dir .. '" && nohup node server.js >/dev/null 2>&1 &')
+    end
+  end
+
+  if is_windows() then
+    run_shell('start "" "' .. WEB_URL .. '"')
+  else
+    run_shell('xdg-open "' .. WEB_URL .. '" >/dev/null 2>&1')
+  end
+  return true, WEB_URL
+end
+
+local function stop_web()
+  if not is_windows() then return end
+  run_shell('powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort ' .. WEB_PORT ..
+            ' -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }"')
+end
+
+local function on_open_web()
+  local ok, msg = launch_web()
+  if ui.status then ui.status:set_text(ok and ("Web EPG opened: " .. msg) or ("Web launch failed: " .. tostring(msg))) end
+end
+
+local function on_stop_web()
+  stop_web()
+  if ui.status then ui.status:set_text("Web server stopped.") end
 end
 
 -----------------------------------------------------------------------------
@@ -965,10 +1030,10 @@ end
 function descriptor()
   return {
     title = "VLC EPG (IPTV)",
-    version = "1.0.0",
+    version = "1.1.0",
     author = "Hermes",
     shortdesc = "VLC EPG (IPTV)",
-    description = "Loads an M3U playlist and an XMLTV guide, fills playlist columns with program info.",
+    description = "Loads an M3U playlist and an XMLTV guide; fills playlist columns and opens the Web EPG UI.",
     capabilities = { "input-listener" },
   }
 end
@@ -976,6 +1041,11 @@ end
 function activate()
   load_config()
   create_dialog()
+  -- Auto-open the Jellyfin-style Web EPG in the browser.
+  local ok, msg = launch_web()
+  if ui.status then
+    ui.status:set_text(ok and ("Web EPG opened: " .. msg) or ("Web launch failed: " .. tostring(msg)))
+  end
 end
 
 function deactivate()
