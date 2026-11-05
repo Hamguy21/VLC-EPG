@@ -128,14 +128,20 @@
   @keyframes sp { to { transform:rotate(360deg); } }
 
   /* details panel */
-  .details { position:absolute; right:16px; bottom:16px; width:340px; max-width:80%;
+  .details { position:absolute; right:16px; bottom:16px; width:360px; max-width:85%;
     background:var(--panel); border:1px solid var(--border); border-radius:10px;
     padding:14px 16px; z-index:60; box-shadow:0 8px 30px rgba(0,0,0,.5); }
   .details .d-title { font-size:15px; font-weight:650; margin-bottom:2px; }
   .details .d-sub { font-size:12px; color:var(--muted); margin-bottom:8px; }
   .details .d-time { font-size:12px; color:var(--accent2); margin-bottom:6px; }
-  .details .d-desc { font-size:12.5px; color:var(--text); max-height:120px; overflow:auto; }
-  .details .d-row { display:flex; gap:8px; margin-top:10px; }
+  .details .d-desc { font-size:12.5px; color:var(--text); max-height:90px; overflow:auto; margin-bottom:8px; }
+  .details .d-list { max-height:200px; overflow:auto; border-top:1px solid var(--border); padding-top:8px; }
+  .details .dl-head { font-size:10px; text-transform:uppercase; letter-spacing:.6px; color:var(--muted); margin-bottom:6px; }
+  .details .dl-item { display:flex; gap:8px; padding:5px 6px; border-radius:6px; cursor:pointer;
+    font-size:12.5px; align-items:baseline; }
+  .details .dl-item:hover { background:rgba(86,115,245,.12); }
+  .details .dl-time { color:var(--muted); font-size:11px; min-width:44px; }
+  .details .d-row { display:flex; gap:8px; margin-top:12px; }
   .details .d-row .btn { flex:1; }
 
   .toast { position:fixed; bottom:20px; left:50%; transform:translateX(-50%);
@@ -204,6 +210,7 @@
   <div class="d-sub" id="dSub"></div>
   <div class="d-time" id="dTime"></div>
   <div class="d-desc" id="dDesc"></div>
+  <div class="d-list" id="dList"></div>
   <div class="d-row">
     <button class="btn" id="dPlay">▶ Play</button>
     <button class="btn ghost" id="dClose">Close</button>
@@ -477,14 +484,14 @@ function render() {
   stage.innerHTML = html;
   stage.scrollLeft = Math.max(0, nowLeft - stage.clientWidth / 2);
 
-  // click channel row -> play (unless clicking star)
+  // click channel row -> show channel details (unless clicking star)
   stage.querySelectorAll('.row').forEach((row) => {
     row.addEventListener('click', (e) => {
       if (e.target.closest('.star')) return;
       const idx = parseInt(row.id.split('-')[1], 10);
       const ch = channels[idx];
       if (!ch) return;
-      playChannel(ch);
+      showChannelDetails(ch);
     });
   });
 
@@ -548,6 +555,37 @@ function showDetails(ch, p) {
   $('dSub').textContent = ch.name + (p.cat ? ' · ' + p.cat : '');
   $('dTime').textContent = (p.start && p.stop) ? (fmtTime(p.start) + ' – ' + fmtTime(p.stop)) : '';
   $('dDesc').textContent = p.desc || 'No synopsis available.';
+  $('dList').innerHTML = '';
+  d.style.display = 'block';
+  $('dPlay').onclick = () => { d.style.display='none'; playChannel(ch); };
+  $('dClose').onclick = () => { d.style.display = 'none'; };
+}
+
+// Clicking a channel opens a details panel: channel info, now program, upcoming list.
+function showChannelDetails(ch) {
+  const d = $('details');
+  const np = nowProgram(ch, Date.now());
+  $('dTitle').textContent = ch.name;
+  $('dSub').textContent = (ch.group ? ch.group : '') + (ch.epg ? ' · has EPG' : ' · no EPG');
+  $('dTime').textContent = np ? ('Now: ' + np.title + '  ' + fmtTime(np.start) + '–' + fmtTime(np.stop)) : '';
+  $('dDesc').textContent = np ? (np.desc || '') : 'No program information available for this channel.';
+  // upcoming program list
+  const now = Date.now();
+  const upcoming = (ch.programs || []).filter(p => p.stop > now).slice(0, 10);
+  if (upcoming.length) {
+    $('dList').innerHTML = '<div class="dl-head">Upcoming</div>' + upcoming.map(p =>
+      `<div class="dl-item" data-start="${p.start}" data-stop="${p.stop}" ` +
+      `data-tt="${escapeHtml(p.title)}" data-desc="${escapeHtml(p.desc||'')}" ` +
+      `data-cat="${escapeHtml(p.cat||'')}"><span class="dl-time">${fmtTime(p.start)}</span> ${escapeHtml(p.title)}</div>`).join('');
+    $('dList').querySelectorAll('.dl-item').forEach(it => {
+      it.addEventListener('click', () => {
+        showDetails(ch, { title: it.dataset.tt, desc: it.dataset.desc, cat: it.dataset.cat,
+          start: +it.dataset.start, stop: +it.dataset.stop });
+      });
+    });
+  } else {
+    $('dList').innerHTML = '';
+  }
   d.style.display = 'block';
   $('dPlay').onclick = () => { d.style.display='none'; playChannel(ch); };
   $('dClose').onclick = () => { d.style.display = 'none'; };
@@ -563,6 +601,19 @@ $('q').addEventListener('input', () => { if (state.channels.length) render(); })
 $('window').addEventListener('change', () => { if (state.channels.length) render(); });
 $('m3u').addEventListener('keydown', e => { if (e.key === 'Enter') loadGuide(); });
 $('xmltv').addEventListener('keydown', e => { if (e.key === 'Enter') loadGuide(); });
+
+// Horizontal wheel-scroll over the timeline (scroll rows left/right).
+stage.addEventListener('wheel', (e) => {
+  // Only intercept when there's horizontal overflow and the pointer is over the
+  // program area (right of the sticky channel column).
+  if (stage.scrollWidth <= stage.clientWidth) return;
+  const r = stage.getBoundingClientRect();
+  if (e.clientX - r.left < 240) return; // over the channel column -> keep vertical
+  if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+    e.preventDefault();
+    stage.scrollLeft += e.deltaY;
+  }
+}, { passive: false });
 
 /* ---------- jump-to-channel autocomplete ---------- */
 (function setupJump() {
