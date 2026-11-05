@@ -167,6 +167,24 @@
     background:#222a38; border:1px solid var(--border); padding:10px 18px; border-radius:8px;
     font-size:13px; z-index:100; opacity:0; transition:opacity .2s; pointer-events:none; }
   .toast.show { opacity:1; }
+
+  /* settings modal */
+  .overlay { position:fixed; inset:0; background:rgba(0,0,0,.45); z-index:90;
+    display:none; align-items:center; justify-content:center; }
+  .overlay.open { display:flex; }
+  .panel { background:var(--panel); border:1px solid var(--border); border-radius:12px;
+    width:420px; max-width:92%; padding:18px 20px; box-shadow:0 12px 40px rgba(0,0,0,.5); }
+  .panel h2 { margin:0 0 4px; font-size:16px; }
+  .panel .p-sub { font-size:12px; color:var(--muted); margin-bottom:14px; }
+  .panel .p-row { margin-bottom:14px; }
+  .panel .p-lbl { font-size:11px; text-transform:uppercase; letter-spacing:.5px;
+    color:var(--muted); display:block; margin-bottom:6px; }
+  .panel .fmt-opts { display:flex; gap:8px; flex-wrap:wrap; }
+  .panel .fmt-opt { display:flex; align-items:center; gap:6px; border:1px solid var(--border);
+    border-radius:8px; padding:6px 10px; cursor:pointer; font-size:13px; }
+  .panel .fmt-opt.sel { border-color:var(--accent); background:rgba(86,115,245,.12); }
+  .panel .fmt-opt input { accent-color:var(--accent); }
+  .panel .p-actions { display:flex; gap:8px; margin-top:16px; justify-content:flex-end; }
 </style>
 </head>
 <body>
@@ -181,6 +199,7 @@
     <button class="btn ghost" id="sample">Sample</button>
     <button class="btn ghost" id="grab" title="Auto-fetch matching EPG guides for these channels">⚡ Auto EPG</button>
     <button class="btn ghost" id="saveSrc" title="Save the current playlist/EPG as a named source">+ Save</button>
+    <button class="btn ghost" id="settingsBtn" title="Settings">⚙</button>
     <div class="field"><label>Saved sources</label>
       <select id="saved"><option value="">— none —</option></select></div>
     <button class="btn ghost small" id="loadSaved" title="Load selected source">Load</button>
@@ -246,18 +265,41 @@
   </div>
 </div>
 
+<!-- Settings modal -->
+<div class="overlay" id="overlay">
+  <div class="panel">
+    <h2>Settings</h2>
+    <div class="p-sub">Display preferences</div>
+    <div class="p-row">
+      <span class="p-lbl">Date format</span>
+      <div class="fmt-opts" id="fmtOpts">
+        <label class="fmt-opt"><input type="radio" name="dfmt" value="DMY"> D / M / Y</label>
+        <label class="fmt-opt"><input type="radio" name="dfmt" value="YMD"> Y / M / D</label>
+        <label class="fmt-opt"><input type="radio" name="dfmt" value="MDY"> M / D / Y</label>
+      </div>
+    </div>
+    <div class="p-actions">
+      <button class="btn ghost" id="settClose">Close</button>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script>
 const $ = id => document.getElementById(id);
 const stage = $('stage');
-const state = { channels: [], groups: [], now: Date.now(), fav: new Set(), current: null };
+const state = { channels: [], groups: [], now: Date.now(), fav: new Set(), current: null, dfmt: 'DMY' };
 let timer = null;
 const LS_SOURCES = 'vlcEpgSources';
 const LS_FAV = 'vlcEpgFavorites';
+const LS_DFMT = 'vlcEpgDateFormat';
 
 function loadFav() { try { state.fav = new Set(JSON.parse(localStorage.getItem(LS_FAV) || '[]')); } catch (_) {} }
 function saveFav() { localStorage.setItem(LS_FAV, JSON.stringify([...state.fav])); }
+
+function loadDfmt() { try { const v = localStorage.getItem(LS_DFMT); if (v === 'YMD' || v === 'MDY') state.dfmt = v; } catch (_) {} }
+function saveDfmt() { localStorage.setItem(LS_DFMT, state.dfmt); }
 
 function toast(msg, isErr) {
   const t = $('toast'); t.textContent = msg; t.classList.add('show');
@@ -282,6 +324,14 @@ function fmtTime(ms) {
   const d = new Date(ms);
   return d.getHours().toString().padStart(2,'0') + ':' + d.getMinutes().toString().padStart(2,'0');
 }
+function fmtDate(ms) {
+  const d = new Date(ms);
+  const Y = d.getFullYear(), M = (d.getMonth()+1).toString().padStart(2,'0'), D = d.getDate().toString().padStart(2,'0');
+  if (state.dfmt === 'YMD') return `${Y}/${M}/${D}`;
+  if (state.dfmt === 'MDY') return `${M}/${D}/${Y}`;
+  return `${D}/${M}/${Y}`;
+}
+function fmtDateTime(ms) { return fmtDate(ms) + ' ' + fmtTime(ms); }
 function nowProgram(ch, at) {
   for (const p of (ch.programs || [])) {
     if (p.start <= at && p.stop > at) return p;
@@ -330,6 +380,29 @@ $('loadSaved').addEventListener('click', () => {
   $('m3u').value = s.m3u;
   $('xmltv').value = s.xmltv || '';
   loadGuide();
+});
+
+// ---- Settings modal ----
+function openSettings() {
+  document.querySelectorAll('.fmt-opt input[name="dfmt"]').forEach(r => {
+    const sel = r.value === state.dfmt;
+    r.checked = sel;
+    r.closest('.fmt-opt').classList.toggle('sel', sel);
+  });
+  $('overlay').classList.add('open');
+}
+function closeSettings() { $('overlay').classList.remove('open'); }
+$('settingsBtn').addEventListener('click', openSettings);
+$('settClose').addEventListener('click', closeSettings);
+$('overlay').addEventListener('click', e => { if (e.target === $('overlay')) closeSettings(); });
+$('fmtOpts').addEventListener('change', e => {
+  if (e.target.name !== 'dfmt') return;
+  state.dfmt = e.target.value;
+  saveDfmt();
+  document.querySelectorAll('.fmt-opt input[name="dfmt"]').forEach(r =>
+    r.closest('.fmt-opt').classList.toggle('sel', r.checked));
+  if (state.channels.length) render();
+  toast('Date format: ' + e.target.value.replace('DMY','D/M/Y').replace('YMD','Y/M/D').replace('MDY','M/D/Y'));
 });
 // Delete the selected source
 $('delSaved').addEventListener('click', () => {
@@ -607,6 +680,7 @@ function renderMeta(program, channel) {
     if (ep && ep.season != null) push('Season', ep.season);
     if (ep && ep.episode != null) push('Episode №', ep.episode);
     if (program.year) push('Year', program.year);
+    if (program.start) push('Date', fmtDate(program.start));
     if (program.rating) push('Rating', program.rating);
     if (program.lang) push('Language', program.lang.toUpperCase());
     const creds = []; if (program.directors && program.directors.length) creds.push('Dir: ' + program.directors.join(', '));
@@ -665,7 +739,7 @@ function showChannelDetails(ch) {
     $('dList').innerHTML = '<div class="dl-head">Upcoming</div>' + upcoming.map(p =>
       `<div class="dl-item" data-start="${p.start}" data-stop="${p.stop}" ` +
       `data-tt="${escapeHtml(p.title)}" data-desc="${escapeHtml(p.desc||'')}" ` +
-      `data-cat="${escapeHtml(p.cat||'')}"><span class="dl-time">${fmtTime(p.start)}</span> ${escapeHtml(p.title)}</div>`).join('');
+      `data-cat="${escapeHtml(p.cat||'')}"><span class="dl-time">${fmtDateTime(p.start)}</span> ${escapeHtml(p.title)}</div>`).join('');
     $('dList').querySelectorAll('.dl-item').forEach(it => {
       it.addEventListener('click', () => {
         showDetails(ch, { title: it.dataset.tt, desc: it.dataset.desc, cat: it.dataset.cat,
@@ -762,6 +836,7 @@ stage.addEventListener('wheel', (e) => {
 })();
 
 loadFav();
+loadDfmt();
 refreshSavedDropdown('');
 </script>
 </body>
