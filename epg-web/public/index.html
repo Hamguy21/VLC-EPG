@@ -30,6 +30,7 @@
     border-radius:6px; font-size:13px; font-weight:600; cursor:pointer; }
   .btn:hover { background:var(--accent2); }
   .btn.ghost { background:transparent; border:1px solid var(--border); color:var(--text); }
+  .btn.small { padding:4px 9px; font-size:11.5px; }
   .status { margin-left:auto; color:var(--muted); font-size:12px; max-width:320px; }
   .status.ok { color:#5fd48a; }
   .status.err { color:var(--now); }
@@ -153,9 +154,12 @@
       <input id="xmltv" placeholder="https://…/epg.xml (empty → auto-find in playlist header)"></div>
     <button class="btn" id="load">Load guide</button>
     <button class="btn ghost" id="sample">Sample</button>
-    <button class="btn ghost" id="saveSrc" title="Save these sources">Save</button>
+    <button class="btn ghost" id="saveSrc" title="Save the current playlist/EPG as a named source">+ Save</button>
     <div class="field"><label>Saved sources</label>
       <select id="saved"><option value="">— none —</option></select></div>
+    <button class="btn ghost small" id="loadSaved" title="Load selected source">Load</button>
+    <button class="btn ghost small" id="delSaved" title="Delete selected source">Delete</button>
+    <button class="btn ghost small" id="editSaved" title="Edit selected source name">Rename</button>
     <div class="status" id="status">Enter a playlist + EPG, or load the sample.</div>
   </div>
 
@@ -249,32 +253,69 @@ function nowProgram(ch, at) {
   return null;
 }
 
-/* ---------- sources ---------- */
+/* ---------- sources (add / load / rename / delete) ---------- */
 function savedSources() { try { return JSON.parse(localStorage.getItem(LS_SOURCES) || '[]'); } catch (_) { return []; } }
 function writeSources(list) { localStorage.setItem(LS_SOURCES, JSON.stringify(list)); }
+function selectedSource() {
+  const name = $('saved').value;
+  return savedSources().find(s => s.name === name) || null;
+}
 function refreshSavedDropdown(selectedName) {
   const dd = $('saved'); const list = savedSources();
   dd.innerHTML = '<option value="">— none —</option>' + list.map(s =>
     `<option ${s.name === selectedName ? 'selected' : ''}>${escapeHtml(s.name)}</option>`).join('');
-  dd.onchange = () => {
-    const s = list.find(x => x.name === dd.value);
-    if (s) { $('m3u').value = s.m3u; $('xmltv').value = s.xmltv || ''; loadGuide(); }
-  };
 }
+// Save current playlist/EPG as a named source (add or overwrite)
 $('saveSrc').addEventListener('click', () => {
   const m3u = $('m3u').value.trim();
+  const xmltv = $('xmltv').value.trim();
   if (!m3u) { toast('Enter a playlist first', true); return; }
-  const name = prompt('Name this saved source:', (m3u.split('/').pop().split('?')[0] || 'source').slice(0,40));
+  let name = prompt('Name this saved source:', '');
   if (!name) return;
-  const list = savedSources().filter(s => s.name !== name);
-  list.push({ name, m3u, xmltv: $('xmltv').value.trim() });
-  writeSources(list); refreshSavedDropdown(name); toast('Saved: ' + name);
+  name = name.trim();
+  if (!name) return;
+  const list = savedSources();
+  const existing = list.findIndex(s => s.name === name);
+  if (existing >= 0) {
+    if (!confirm('A source named "' + name + '" already exists. Overwrite it?')) return;
+    list[existing] = { name, m3u, xmltv };
+  } else {
+    list.push({ name, m3u, xmltv });
+  }
+  writeSources(list);
+  refreshSavedDropdown(name);
+  toast('Saved: ' + name);
 });
-$('saved').addEventListener('dblclick', () => {
-  const name = $('saved').value;
+// Load the selected source into the inputs and fetch it
+$('loadSaved').addEventListener('click', () => {
+  const s = selectedSource();
+  if (!s) { toast('Select a saved source first', true); return; }
+  $('m3u').value = s.m3u;
+  $('xmltv').value = s.xmltv || '';
+  loadGuide();
+});
+// Delete the selected source
+$('delSaved').addEventListener('click', () => {
+  const s = selectedSource();
+  if (!s) { toast('Select a saved source first', true); return; }
+  if (!confirm('Delete source "' + s.name + '"?')) return;
+  writeSources(savedSources().filter(x => x.name !== s.name));
+  refreshSavedDropdown('');
+  toast('Deleted: ' + s.name);
+});
+// Rename the selected source
+$('editSaved').addEventListener('click', () => {
+  const s = selectedSource();
+  if (!s) { toast('Select a saved source first', true); return; }
+  const name = prompt('New name for "' + s.name + '":', s.name);
   if (!name) return;
-  writeSources(savedSources().filter(s => s.name !== name));
-  refreshSavedDropdown(''); toast('Removed: ' + name);
+  const nn = name.trim();
+  if (!nn) return;
+  const list = savedSources().filter(x => x.name !== s.name);
+  list.push({ name: nn, m3u: s.m3u, xmltv: s.xmltv });
+  writeSources(list);
+  refreshSavedDropdown(nn);
+  toast('Renamed: ' + nn);
 });
 
 /* ---------- loaders ---------- */
