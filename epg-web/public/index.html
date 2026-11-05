@@ -585,8 +585,8 @@ function showLoading(on) {
   } else if (el) el.remove();
 }
 
-function buildRuler(halfHours, pxPerHour, now) {
-  let html = '<div class="ruler">';
+function buildRuler(halfHours, pxPerHour, now, width) {
+  let html = `<div class="ruler" style="width:${width}px">`;
   for (let h = -halfHours; h <= halfHours; h++) {
     const t = new Date(now + h * 3600e3);
     const left = (h + halfHours) * pxPerHour;
@@ -600,7 +600,12 @@ function favKey(ch) { return ch.tvg_id || ch.name; }
 function render() {
   const now = Date.now();
   const halfHours = parseInt($('window').value, 10);
-  const pxPerHour = 240;
+  // Stretch the timeline to fill the full grid area, so program blocks use
+  // all available width instead of stopping partway across a wide screen.
+  const minPxPerHour = 240;
+  const nominalW = halfHours * 2 * minPxPerHour;
+  const availW = stage.clientWidth;
+  const pxPerHour = Math.max(minPxPerHour, nominalW >= availW ? minPxPerHour : availW / (halfHours * 2));
   const totalW = halfHours * 2 * pxPerHour;
   const start = now - halfHours * 3600e3;
   const end = now + halfHours * 3600e3;
@@ -624,7 +629,7 @@ function render() {
   state.view = channels;
   if (state.sel != null && state.sel >= channels.length) state.sel = channels.length - 1;
 
-  let html = buildRuler(halfHours, pxPerHour, now);
+  let html = buildRuler(halfHours, pxPerHour, now, totalW);
   html += '<div class="grid" style="width:' + totalW + 'px">';
 
   channels.forEach((ch, idx) => {
@@ -923,6 +928,14 @@ switch (e.key) {
   }
 }
 });
+// Re-render on resize so the timeline keeps filling the full width.
+(() => {
+  let t;
+  window.addEventListener('resize', () => {
+    clearTimeout(t);
+    t = setTimeout(() => { if (state.channels.length) render(); }, 150);
+  });
+})();
 
 /* ---------- jump-to-channel autocomplete ---------- */
 (function setupJump() {
