@@ -45,8 +45,21 @@ local DISPLAY_OPTIONS = {
   { id = 7, label = "Next 12 hours", mode = "hours", n = 12 },
 }
 local DEFAULT_DISPLAY = 3
-local DISPLAY_BY_ID = {}
-for _, o in ipairs(DISPLAY_OPTIONS) do DISPLAY_BY_ID[o.id] = o end
+
+-- Built lazily (not at load time): VLC's extension *scan* runs the script in
+-- a bare Lua state with no standard library, so top-level code must not call
+-- functions like ipairs(). Runtime environment has the full library.
+local DISPLAY_BY_ID
+local function display_by_id()
+  if not DISPLAY_BY_ID then
+    DISPLAY_BY_ID = {}
+    for i = 1, #DISPLAY_OPTIONS do
+      local o = DISPLAY_OPTIONS[i]
+      DISPLAY_BY_ID[o.id] = o
+    end
+  end
+  return DISPLAY_BY_ID
+end
 
 -----------------------------------------------------------------------------
 -- State
@@ -279,7 +292,7 @@ local function load_config()
     if k == "epg" then state.epg = trim(v) end
     if k == "display" then
       local id = tonumber(v)
-      if id and DISPLAY_BY_ID[id] then state.display = id end
+      if id and display_by_id()[id] then state.display = id end
     end
   end
   f:close()
@@ -866,7 +879,7 @@ local function load_into_playlist(force)
   vlc.playlist.clear()
   vlc.playlist.add(items)
 
-  local opt = DISPLAY_BY_ID[state.display] or DISPLAY_BY_ID[DEFAULT_DISPLAY]
+  local opt = display_by_id()[state.display] or display_by_id()[DEFAULT_DISPLAY]
   local msg = string.format("%d channels added (%s).", #items, opt.label)
   if state.guide_note ~= "" then msg = msg .. " " .. state.guide_note end
   set_status(msg)
@@ -911,7 +924,7 @@ local function read_fields()
   state.epg = strip_quotes(ui.in_epg:get_text())
   if ui.display then
     local id = ui.display:get_value()
-    if type(id) == "number" and DISPLAY_BY_ID[id] then state.display = id end
+    if type(id) == "number" and display_by_id()[id] then state.display = id end
   end
   save_config()
 end
@@ -937,7 +950,7 @@ local function create_dialog()
   d:add_label("Show in Description:", 1, 6, 3, 1)
   ui.display = d:add_dropdown(4, 6, 5, 1)
   local current = state.display
-  if not DISPLAY_BY_ID[current] then current = DEFAULT_DISPLAY end
+  if not display_by_id()[current] then current = DEFAULT_DISPLAY end
   for _, o in ipairs(DISPLAY_OPTIONS) do
     ui.display:add_value(o.label, o.id)
   end
