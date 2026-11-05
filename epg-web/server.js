@@ -17,6 +17,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
+const crypto = require('crypto');
 const { spawn } = require('child_process');
 
 const PORT = process.env.PORT || 8123;
@@ -28,6 +29,7 @@ const VLC = process.env.VLC_BIN || (
 const MAX_BODY = 1 << 20;            // 1 MB request body cap
 const FETCH_TIMEOUT = 30000;
 const PUBLIC_DIR = path.join(__dirname, 'public');
+const SAVE_DIR = path.join(__dirname, 'data');
 
 /* ------------------------------------------------------------------ */
 /* HTTP helpers                                                        */
@@ -414,12 +416,68 @@ async function grabEPG(m3u, requestedCountries) {
 
   const stats = matchChannels(playlist.channels, merged);
   const matched = playlist.channels.filter(c => c.epg).length;
+
+  // Persist the grabbed (matched) guide as a local XMLTV file so the UI can
+  // save it as a source and skip re-grabbing on future loads.
+  let savedFile = null;
+  try {
+    savedFile = saveMergedGuide(merged, playlist.channels);
+  } catch (e) { /* non-fatal: the grab still succeeded */ }
+
   return {
     total: playlist.channels.length,
     matched, codes, failures,
     stats, groups: playlist.groupList,
     channels: playlist.channels,
+    savedFile,
   };
+}
+
+/* Serialize the merged guide for matched channels into an XMLTV file. */
+function saveMergedGuide(merged, channels) {
+  const wanted = new Set(channels.filter(c => c.epg).map(c => c.epg));
+  if (!wanted.size) return null;
+
+  const esc = s => String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+
+  let xml = '<?xml version="1.0" encoding="UTF-8"?>\n<tv generator-info-name="vlc-epg-auto">\n';
+
+  for (const id of wanted) {
+    const ch = merged.channels[id];
+    if (!ch) continue;
+    const displayName = (ch.displayNames && ch.displayNames[0]) || id;
+    const logo = ch.logos && ch.logos[0];
+    xml += `  <channel id="${esc(id)}">\n`;
+    xml += `    <display-name>${esc(displayName)}</display-name>\n`;
+    if (logo) xml += `    <icon src="${esc(logo)}"/>\n`;
+    xml += `  </channel>\n`;
+
+    for (const p of (merged.programs[id] || [])) {
+      const st = new Date(p.start);
+      const en = new Date(p.stop);
+      const fmt = d => {
+        const p2 = n => String(n).padStart(2, '0');
+        return `${d.getUTCFullYear()}${p2(d.getUTCMonth()+1)}${p2(d.getUTCDate())}${p2(d.getUTCHours())}${p2(d.getUTCMinutes())}${p2(d.getUTCSeconds())} +0000`;
+      };
+      xml += `  <programme start="${fmt(st)}" stop="${fmt(en)}" channel="${esc(id)}">\n`;
+      xml += `    <title lang="en">${esc(p.title)}</title>\n`;
+      if (p.desc) xml += `    <desc lang="en">${esc(p.desc)}</desc>\n`;
+      if (p.cat) xml += `    <category lang="en">${esc(p.cat)}</category>\n`;
+      if (p.sub) xml += `    <sub-title lang="en">${esc(p.sub)}</sub-title>\n`;
+      if (p.year) xml += `    <date>${esc(p.year)}</date>\n`;
+      if (p.icon) xml += `    <icon src="${esc(p.icon)}"/>\n`;
+      xml += `  </programme>\n`;
+    }
+  }
+  xml += '</tv>\n';
+
+  const hash = crypto.createHash('sha1').update(xml).digest('hex').slice(0, 12);
+  const file = path.join(SAVE_DIR, `epg_${hash}.xml`);
+  fs.mkdirSync(SAVE_DIR, { recursive: true });
+  fs.writeFileSync(file, xml);
+  return file;
 }
 
 /* ------------------------------------------------------------------ */

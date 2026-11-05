@@ -559,13 +559,28 @@ async function autoGrab() {
     const j = await post('/grab', { m3u });
     state.channels = j.channels.map((c, i) => ({ ...c, _src: i }));
     state.groups = j.groups;
-    $('xmltv').value = ''; // clears the manual source; the grab result is in memory
+    // The server wrote the matched guide to a local XMLTV file. If a saved
+    // source is selected, store that file as its data; otherwise just fill the
+    // input (no list changes).
+    if (j.savedFile) {
+      $('xmltv').value = j.savedFile;
+      const sel = selectedSources();
+      if (sel.length) {
+        const list = savedSources();
+        const names = new Set(sel.map(s => s.name));
+        list.forEach(s => { if (names.has(s.name)) s.xmltv = j.savedFile; });
+        writeSources(list);
+        refreshSavedDropdown(sel[0].name);
+      }
+    }
+    $('xmltv').value = $('xmltv').value || '';
     render();
     const msg = j.matched + ' of ' + j.total + ' channels matched (' +
       j.stats.id + ' by id, ' + j.stats.name + ' by name) from ' +
       j.codes.length + ' guide(s)';
-    setStatus(j.failures && j.failures.length ? msg + ' · errors: ' + j.failures.join('; ') : msg);
-    toast('Auto EPG: ' + msg);
+    const saved = j.savedFile ? ' · saved to selected source' : '';
+    setStatus(j.failures && j.failures.length ? msg + ' · errors: ' + j.failures.join('; ') + saved : msg + saved);
+    toast('Auto EPG: ' + msg + saved);
   } catch (e) {
     setStatus('Auto-grab failed: ' + e.message, 'err');
     toast('Auto-grab failed: ' + e.message, true);
