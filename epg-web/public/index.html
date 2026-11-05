@@ -154,6 +154,7 @@
       <input id="xmltv" placeholder="https://…/epg.xml (empty → auto-find in playlist header)"></div>
     <button class="btn" id="load">Load guide</button>
     <button class="btn ghost" id="sample">Sample</button>
+    <button class="btn ghost" id="grab" title="Auto-fetch matching EPG guides for these channels">⚡ Auto EPG</button>
     <button class="btn ghost" id="saveSrc" title="Save the current playlist/EPG as a named source">+ Save</button>
     <div class="field"><label>Saved sources</label>
       <select id="saved"><option value="">— none —</option></select></div>
@@ -355,6 +356,31 @@ async function sample() {
   await loadGuide();
 }
 
+// Auto-grab: ask the server to find matching EPG guides for the current playlist.
+async function autoGrab() {
+  const m3u = $('m3u').value.trim();
+  if (!m3u) { toast('Enter an M3U playlist first', true); return; }
+  setStatus('Auto-grabbing EPG guides… (this may take a few seconds)');
+  showLoading(true);
+  try {
+    const j = await post('/grab', { m3u });
+    state.channels = j.channels.map((c, i) => ({ ...c, _src: i }));
+    state.groups = j.groups;
+    $('xmltv').value = ''; // clears the manual source; the grab result is in memory
+    render();
+    const msg = j.matched + ' of ' + j.total + ' channels matched (' +
+      j.stats.id + ' by id, ' + j.stats.name + ' by name) from ' +
+      j.codes.length + ' guide(s)';
+    setStatus(j.failures && j.failures.length ? msg + ' · errors: ' + j.failures.join('; ') : msg);
+    toast('Auto EPG: ' + msg);
+  } catch (e) {
+    setStatus('Auto-grab failed: ' + e.message, 'err');
+    toast('Auto-grab failed: ' + e.message, true);
+  } finally {
+    showLoading(false);
+  }
+}
+
 /* ---------- rendering ---------- */
 function showLoading(on) {
   let el = document.querySelector('.loading');
@@ -530,6 +556,7 @@ function showDetails(ch, p) {
 /* events */
 $('load').addEventListener('click', loadGuide);
 $('sample').addEventListener('click', sample);
+$('grab').addEventListener('click', autoGrab);
 $('group').addEventListener('change', () => { if (state.channels.length) render(); });
 $('filter').addEventListener('change', () => { if (state.channels.length) render(); });
 $('q').addEventListener('input', () => { if (state.channels.length) render(); });
