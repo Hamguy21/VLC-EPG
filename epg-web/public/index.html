@@ -495,10 +495,12 @@ function render() {
     }
     html += '</div>'; // row
   });
-  html += '</div>';
 
+  // now-line must live inside the grid so it spans the full content height
   const nowLeft = halfHours * pxPerHour;
   html += `<div class="nowline" style="left:${nowLeft}px"></div>`;
+  html += '</div>'; // grid
+
   stage.innerHTML = html;
   stage.scrollLeft = Math.max(0, nowLeft - stage.clientWidth / 2);
 
