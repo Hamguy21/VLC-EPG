@@ -78,11 +78,12 @@
   .ruler .tick { position:absolute; top:0; bottom:0; border-left:1px solid var(--grid);
     font-size:10px; color:var(--muted); padding:2px 4px; white-space:nowrap; }
 
-  .row { position:relative; height:72px; border-bottom:1px solid var(--grid); cursor:pointer; }
+  .row { position:relative; height:72px; border-bottom:1px solid var(--grid); cursor:pointer;
+    content-visibility:auto; contain-intrinsic-size:auto 72px; }
   .row:hover { background:rgba(86,115,245,.06); }
   .row.playing { box-shadow:inset 3px 0 0 var(--accent); }
   .row.selected { background:rgba(86,115,245,.10); }
-  .row.selected .ch { background:linear-gradient(90deg, rgba(86,115,245,.22), rgba(86,115,245,.06) 80%); }
+  .row.selected .ch { background:#1e2636; }
   .row.selected .ch .name { color:var(--accent2); }
   .row.selected::before { content:""; position:absolute; left:0; top:0; bottom:0; width:3px;
     background:var(--accent); z-index:12; }
@@ -175,7 +176,7 @@
   .toast.show { opacity:1; }
 
   /* TV mode: bigger text/hit areas for viewing at a distance */
-  body.tv .row { height:96px; }
+  body.tv .row { height:96px; contain-intrinsic-size:auto 96px; }
   body.tv .row .ch { width:300px; height:96px; }
   body.tv .row .ch .name { font-size:16px; }
   body.tv .row .ch .nowprog { font-size:13px; }
@@ -671,8 +672,7 @@ function render() {
       const idx = parseInt(row.id.split('-')[1], 10);
       const ch = channels[idx];
       if (!ch) return;
-      state.sel = idx;
-      render();
+      selectAt(idx);
       showChannelDetails(ch);
     });
   });
@@ -857,14 +857,24 @@ stage.addEventListener('wheel', (e) => {
 }, { passive: false });
 
 // ---- Remote / keyboard navigation (TV-style) ----
+function rowHeight() { return document.body.classList.contains('tv') ? 96 : 72; }
 function selectAt(idx) {
-if (!state.view.length) return;
-if (idx < 0) idx = 0;
-if (idx >= state.view.length) idx = state.view.length - 1;
-state.sel = idx;
-render();
-const row = document.getElementById('row-' + idx);
-if (row) row.scrollIntoView({ block: 'nearest' });
+  if (!state.view.length) return;
+  if (idx < 0) idx = 0;
+  if (idx >= state.view.length) idx = state.view.length - 1;
+  state.sel = idx;
+  // Move only the highlight class — avoid re-rendering the whole grid.
+  document.querySelectorAll('.row.selected').forEach(r => r.classList.remove('selected'));
+  const row = document.getElementById('row-' + idx);
+  if (row) {
+    row.classList.add('selected');
+    // Vertically scroll via arithmetic (uniform row height) — no DOM layout reads.
+    const h = rowHeight();
+    const top = idx * h;
+    const vh = stage.clientHeight;
+    if (top < stage.scrollTop) stage.scrollTop = top - 8;
+    else if (top + h > stage.scrollTop + vh) stage.scrollTop = top + h - vh + 8;
+  }
 }
 function selChannel() { return state.sel != null ? state.view[state.sel] : null; }
 window.addEventListener('keydown', (e) => {
