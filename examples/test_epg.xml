@@ -1,82 +1,117 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE tv SYSTEM "xmltv.dtd">
 <tv generator-info-name="test">
-  <channel id="CNN.us@SD"><display-name>CNN</display-name></channel>
-  <channel id="BBC.uk@HD"><display-name>BBC One HD</display-name></channel>
-  <channel id="FOXNZ.us@SD"><display-name>Fox News</display-name></channel>
-  <channel id="Eurosport1.de@HD"><display-name>Eurosport 1</display-name></channel>
-  <channel id="TLC.uk@SD"><display-name>TLC</display-name></channel>
-  <programme start="20261105112946 +0000" stop="20261105122946 +0000" channel="CNN.us@SD">
+  <channel id="CNN.us@SD"><display-name>CNN</display-name><icon src="https://picsum.photos/seed/CNN.us@SD/400/225"/></channel>
+  <channel id="BBC.uk@HD"><display-name>BBC One HD</display-name><icon src="https://picsum.photos/seed/BBC.uk@HD/400/225"/></channel>
+  <channel id="FOXNZ.us@SD"><display-name>Fox News</display-name><icon src="https://picsum.photos/seed/FOXNZ.us@SD/400/225"/></channel>
+  <channel id="Eurosport1.de@HD"><display-name>Eurosport 1</display-name><icon src="https://picsum.photos/seed/Eurosport1.de@HD/400/225"/></channel>
+  <channel id="TLC.uk@SD"><display-name>TLC</display-name><icon src="https://picsum.photos/seed/TLC.uk@SD/400/225"/></channel>
+  <programme start="20261105120207 +0000" stop="20261105130207 +0000" channel="CNN.us@SD">
+    <icon src="https://picsum.photos/seed/CNN.us@SD-0/400/225"/>
+    <sub-title lang="en">Episode One</sub-title>
+    <episode-num system="xmltv_ns">1.2.</episode-num>
+    <date>2024</date>
+    <rating system="VCHIP"><value>TV-PG</value></rating>
+    <credits><director>Jane Doe</director><actor>John Smith</actor><actor>Alice Brown</actor></credits>
+    <audio><stereo>stereo</stereo><languages>English,Spanish</languages></audio>
     <title lang="en">Breaking News</title>
     <category lang="en">News</category>
     <desc lang="en">Live coverage of the day's top stories.</desc>
   </programme>
-  <programme start="20261105122946 +0000" stop="20261105132946 +0000" channel="CNN.us@SD">
+  <programme start="20261105130207 +0000" stop="20261105140207 +0000" channel="CNN.us@SD">
     <title lang="en">World Report</title>
     <category lang="en">News</category>
     <desc lang="en">International headlines from around the globe.</desc>
   </programme>
-  <programme start="20261105132946 +0000" stop="20261105142946 +0000" channel="CNN.us@SD">
+  <programme start="20261105140207 +0000" stop="20261105150207 +0000" channel="CNN.us@SD">
     <title lang="en">The Situation Room</title>
     <category lang="en">News</category>
     <desc lang="en">Analysis and interviews.</desc>
   </programme>
-  <programme start="20261105112946 +0000" stop="20261105122946 +0000" channel="BBC.uk@HD">
+  <programme start="20261105120207 +0000" stop="20261105130207 +0000" channel="BBC.uk@HD">
+    <icon src="https://picsum.photos/seed/BBC.uk@HD-0/400/225"/>
+    <sub-title lang="en">Episode One</sub-title>
+    <episode-num system="xmltv_ns">1.2.</episode-num>
+    <date>2024</date>
+    <rating system="VCHIP"><value>TV-PG</value></rating>
+    <credits><director>Jane Doe</director><actor>John Smith</actor><actor>Alice Brown</actor></credits>
+    <audio><stereo>stereo</stereo><languages>English,Spanish</languages></audio>
     <title lang="en">BBC News at One</title>
     <category lang="en">News</category>
     <desc lang="en">The latest national and international news.</desc>
   </programme>
-  <programme start="20261105122946 +0000" stop="20261105132946 +0000" channel="BBC.uk@HD">
+  <programme start="20261105130207 +0000" stop="20261105140207 +0000" channel="BBC.uk@HD">
     <title lang="en">Antiques Roadshow</title>
     <category lang="en">Entertainment</category>
     <desc lang="en">Members of the public bring items to be valued.</desc>
   </programme>
-  <programme start="20261105132946 +0000" stop="20261105142946 +0000" channel="BBC.uk@HD">
+  <programme start="20261105140207 +0000" stop="20261105150207 +0000" channel="BBC.uk@HD">
     <title lang="en">Pointless</title>
     <category lang="en">Quiz</category>
     <desc lang="en">A general knowledge quiz.</desc>
   </programme>
-  <programme start="20261105112946 +0000" stop="20261105122946 +0000" channel="FOXNZ.us@SD">
+  <programme start="20261105120207 +0000" stop="20261105130207 +0000" channel="FOXNZ.us@SD">
+    <icon src="https://picsum.photos/seed/FOXNZ.us@SD-0/400/225"/>
+    <sub-title lang="en">Episode One</sub-title>
+    <episode-num system="xmltv_ns">1.2.</episode-num>
+    <date>2024</date>
+    <rating system="VCHIP"><value>TV-PG</value></rating>
+    <credits><director>Jane Doe</director><actor>John Smith</actor><actor>Alice Brown</actor></credits>
+    <audio><stereo>stereo</stereo><languages>English,Spanish</languages></audio>
     <title lang="en">Fox & Friends</title>
     <category lang="en">News</category>
     <desc lang="en">Morning news and commentary.</desc>
   </programme>
-  <programme start="20261105122946 +0000" stop="20261105132946 +0000" channel="FOXNZ.us@SD">
+  <programme start="20261105130207 +0000" stop="20261105140207 +0000" channel="FOXNZ.us@SD">
     <title lang="en">The Five</title>
     <category lang="en">Talk</category>
     <desc lang="en">Panel discussion of the day's stories.</desc>
   </programme>
-  <programme start="20261105132946 +0000" stop="20261105142946 +0000" channel="FOXNZ.us@SD">
+  <programme start="20261105140207 +0000" stop="20261105150207 +0000" channel="FOXNZ.us@SD">
     <title lang="en">Special Report</title>
     <category lang="en">News</category>
     <desc lang="en">Evening news broadcast.</desc>
   </programme>
-  <programme start="20261105112946 +0000" stop="20261105122946 +0000" channel="Eurosport1.de@HD">
+  <programme start="20261105120207 +0000" stop="20261105130207 +0000" channel="Eurosport1.de@HD">
+    <icon src="https://picsum.photos/seed/Eurosport1.de@HD-0/400/225"/>
+    <sub-title lang="en">Episode One</sub-title>
+    <episode-num system="xmltv_ns">1.2.</episode-num>
+    <date>2024</date>
+    <rating system="VCHIP"><value>TV-PG</value></rating>
+    <credits><director>Jane Doe</director><actor>John Smith</actor><actor>Alice Brown</actor></credits>
+    <audio><stereo>stereo</stereo><languages>English,Spanish</languages></audio>
     <title lang="en">Live: Tennis</title>
     <category lang="en">Sports</category>
     <desc lang="en">Wimbledon quarter-final.</desc>
   </programme>
-  <programme start="20261105122946 +0000" stop="20261105132946 +0000" channel="Eurosport1.de@HD">
+  <programme start="20261105130207 +0000" stop="20261105140207 +0000" channel="Eurosport1.de@HD">
     <title lang="en">Highlights</title>
     <category lang="en">Sports</category>
     <desc lang="en">The day's best action.</desc>
   </programme>
-  <programme start="20261105132946 +0000" stop="20261105142946 +0000" channel="Eurosport1.de@HD">
+  <programme start="20261105140207 +0000" stop="20261105150207 +0000" channel="Eurosport1.de@HD">
     <title lang="en">Live: Cycling</title>
     <category lang="en">Sports</category>
     <desc lang="en">Tour stage coverage.</desc>
   </programme>
-  <programme start="20261105112946 +0000" stop="20261105122946 +0000" channel="TLC.uk@SD">
+  <programme start="20261105120207 +0000" stop="20261105130207 +0000" channel="TLC.uk@SD">
+    <icon src="https://picsum.photos/seed/TLC.uk@SD-0/400/225"/>
+    <sub-title lang="en">Episode One</sub-title>
+    <episode-num system="xmltv_ns">1.2.</episode-num>
+    <date>2024</date>
+    <rating system="VCHIP"><value>TV-PG</value></rating>
+    <credits><director>Jane Doe</director><actor>John Smith</actor><actor>Alice Brown</actor></credits>
+    <audio><stereo>stereo</stereo><languages>English,Spanish</languages></audio>
     <title lang="en">90 Day Fiancé</title>
     <category lang="en">Reality</category>
     <desc lang="en">Couples navigate visa and cultural challenges.</desc>
   </programme>
-  <programme start="20261105122946 +0000" stop="20261105132946 +0000" channel="TLC.uk@SD">
+  <programme start="20261105130207 +0000" stop="20261105140207 +0000" channel="TLC.uk@SD">
     <title lang="en">Say Yes to the Dress</title>
     <category lang="en">Reality</category>
     <desc lang="en">Brides choose their wedding gowns.</desc>
   </programme>
-  <programme start="20261105132946 +0000" stop="20261105142946 +0000" channel="TLC.uk@SD">
+  <programme start="20261105140207 +0000" stop="20261105150207 +0000" channel="TLC.uk@SD">
     <title lang="en">My 600-lb Life</title>
     <category lang="en">Docu-series</category>
     <desc lang="en">Stories of weight loss journeys.</desc>

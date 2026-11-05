@@ -223,8 +223,28 @@ function parseXMLTV(text) {
     const title = ((body.match(/<title[^>]*>([\s\S]*?)<\/title>/) || [])[1] || '').trim();
     const desc = ((body.match(/<desc[^>]*>([\s\S]*?)<\/desc>/) || [])[1] || '').trim();
     const cat = ((body.match(/<category[^>]*>([\s\S]*?)<\/category>/) || [])[1] || '').trim();
+    const icon = ((body.match(/<icon[^>]*src="([^"]*)"/) || [])[1] || '').trim();
+    const sub = ((body.match(/<sub-title[^>]*>([\s\S]*?)<\/sub-title>/) || [])[1] || '').trim();
+    const year = ((body.match(/<date[^>]*>([\s\S]*?)<\/date>/) || [])[1] || '').trim();
+    const lang = (title.match(/\blang="([^"]*)"/) || [])[1] || '';
+    const rating = ((body.match(/<rating[^>]*>([\s\S]*?)<\/rating>/) || [])[1] || '').trim();
+    const ratingVal = ((rating.match(/<value>([\s\S]*?)<\/value>/) || [])[1] || '').trim();
+    const episodeNums = [];
+    for (const en of body.matchAll(/<episode-num\b([^>]*)>([\s\S]*?)<\/episode-num>/g)) {
+      episodeNums.push({ system: (en[1].match(/system="([^"]*)"/) || [])[1] || '', num: en[2].trim() });
+    }
+    const directors = [], actors = [];
+    for (const d of body.matchAll(/<director[^>]*>([\s\S]*?)<\/director>/g)) directors.push(d[1].trim());
+    for (const a of body.matchAll(/<actor[^>]*>([\s\S]*?)<\/actor>/g)) actors.push(a[1].trim());
+    const audio = [];
+    for (const au of body.matchAll(/<audio[^>]*>([\s\S]*?)<\/audio>/g)) {
+      for (const sub of au[1].matchAll(/<([a-z-]+)[^>]*>([\s\S]*?)<\/\1>/g)) audio.push(sub[2].trim());
+    }
     (programs[chId] = programs[chId] || []).push({
-      start, stop, title: dec(title), desc: dec(desc), cat: dec(cat),
+      start, stop, title: dec(title), desc: dec(desc), cat: dec(cat), icon: dec(icon),
+      sub: dec(sub), year: dec(year), lang, rating: dec(ratingVal),
+      episodeNums, directors: directors.map(dec), actors: actors.map(dec),
+      audio: audio.map(dec).filter(Boolean),
     });
   }
   for (const id of Object.keys(programs)) programs[id].sort((a, b) => a.start - b.start);

@@ -145,6 +145,15 @@
   .details .d-sub { font-size:12px; color:var(--muted); margin-bottom:6px; }
   .details .d-time { font-size:12px; color:var(--accent2); margin-bottom:6px; }
   .details .d-desc { font-size:12.5px; color:var(--text); max-height:110px; overflow:auto; }
+  .details .d-meta { display:grid; grid-template-columns:auto 1fr; gap:2px 16px;
+    margin-top:10px; padding-top:8px; border-top:1px solid var(--border); }
+  .details .dm-k { font-size:11px; text-transform:uppercase; letter-spacing:.4px;
+    color:var(--muted); white-space:nowrap; }
+  .details .dm-v { font-size:12.5px; color:var(--text); }
+  .details .d-icon { margin-bottom:10px; }
+  .details .d-icon img { width:100%; max-height:180px; object-fit:cover; border-radius:8px;
+    border:1px solid var(--border); display:block; background:#000; }
+  .details .d-icon img.hidden { display:none; }
   .details .d-list { border-top:1px solid var(--border); padding-top:8px; margin-top:8px; }
   .details .dl-head { font-size:10px; text-transform:uppercase; letter-spacing:.6px; color:var(--muted); margin-bottom:6px; }
   .details .dl-item { display:flex; gap:8px; padding:5px 6px; border-radius:6px; cursor:pointer;
@@ -222,9 +231,11 @@
   </div>
   <div class="d-body">
     <div class="d-main">
+      <div class="d-icon" id="dIcon" style="display:none"><img id="dIconImg" alt="" class="hidden"></div>
       <div class="d-sub" id="dSub"></div>
       <div class="d-time" id="dTime"></div>
       <div class="d-desc" id="dDesc"></div>
+      <div class="d-meta" id="dMeta"></div>
     </div>
     <div class="d-side">
       <div class="d-list" id="dList"></div>
@@ -487,7 +498,7 @@ function render() {
       const isNow = p.start <= now && p.stop > now;
       const tl = `${fmtTime(p.start)}–${fmtTime(p.stop)}`;
       html += `<div class="prog ${isNow?'now':''}" style="left:${left}px;width:${w}px" ` +
-        `data-idx="${idx}" data-tt="${escapeHtml(p.title)}" data-desc="${escapeHtml(p.desc||'')}" data-cat="${escapeHtml(p.cat||'')}" data-start="${p.start}" data-stop="${p.stop}">` +
+        `data-idx="${idx}" data-tt="${escapeHtml(p.title)}" data-desc="${escapeHtml(p.desc||'')}" data-cat="${escapeHtml(p.cat||'')}" data-icon="${escapeHtml(p.icon||'')}" data-start="${p.start}" data-stop="${p.stop}">` +
         `<div class="t">${tl}</div>` +
         `<div class="tt">${escapeHtml(p.title)}</div>` +
         (p.cat ? `<div class="d">${escapeHtml(p.cat)}</div>` : '') +
@@ -521,9 +532,10 @@ function render() {
       e.stopPropagation();
       const idx = parseInt(el.dataset.idx, 10);
       const ch = channels[idx];
-      showDetails(ch, {
+      const full = (ch.programs || []).find(p => p.start === parseInt(el.dataset.start,10) && p.stop === parseInt(el.dataset.stop,10));
+      showDetails(ch, full || {
         title: el.dataset.tt, desc: el.dataset.desc, cat: el.dataset.cat,
-        start: parseInt(el.dataset.start,10), stop: parseInt(el.dataset.stop,10)
+        icon: el.dataset.icon || '', start: parseInt(el.dataset.start,10), stop: parseInt(el.dataset.stop,10)
       });
     });
   });
@@ -572,12 +584,67 @@ function updateNowBar(ch) {
 function openDetails() { $('details').classList.add('open'); }
 function closeDetails() { $('details').classList.remove('open'); }
 
+// Parse xmltv_ns episode-num ("S.E" or "S.E/P") into {season, episode}.
+function parseEpisode(program) {
+  if (!program || !Array.isArray(program.episodeNums)) return null;
+  const ns = program.episodeNums.find(e => e.system === 'xmltv_ns');
+  if (ns) {
+    const m = ns.num.trim().match(/^\s*(\d+)\.(\d+)/);
+    if (m) return { season: +m[1], episode: +m[2] };
+  }
+  const on = program.episodeNums.find(e => e.system === 'onscreen');
+  if (on && /^\d+$/.test(on.num.trim())) return { season: null, episode: +on.num.trim() };
+  return null;
+}
+
+// Build the metadata rows for the drawer (only fields that are present).
+function renderMeta(program, channel) {
+  const rows = [];
+  const push = (k, v) => { if (v != null && String(v).trim() !== '' && String(v).trim() !== '0') rows.push([k, String(v)]); };
+  if (program) {
+    const ep = parseEpisode(program);
+    if (program.sub) push('Episode', program.sub);
+    if (ep && ep.season != null) push('Season', ep.season);
+    if (ep && ep.episode != null) push('Episode №', ep.episode);
+    if (program.year) push('Year', program.year);
+    if (program.rating) push('Rating', program.rating);
+    if (program.lang) push('Language', program.lang.toUpperCase());
+    const creds = []; if (program.directors && program.directors.length) creds.push('Dir: ' + program.directors.join(', '));
+    if (program.actors && program.actors.length) creds.push('Cast: ' + program.actors.join(', '));
+    if (creds.length) push('Director & Cast', creds.join(' · '));
+    if (program.audio && program.audio.length) push('Audio', program.audio.join(', '));
+    if (program.cat) push('Genre', program.cat);
+  } else if (channel && channel.group) {
+    push('Group', channel.group);
+  }
+  if (!rows.length) { $('dMeta').innerHTML = ''; return; }
+  $('dMeta').innerHTML = rows.map(([k, v]) =>
+    `<span class="dm-k">${escapeHtml(k)}</span><span class="dm-v">${escapeHtml(v)}</span>`).join('');
+}
+
+// Show an image card in the drawer when a usable (http/https) icon exists.
+function setDrawerIcon(url) {
+  const wrap = $('dIcon'), img = $('dIconImg');
+  const usable = url && /^https?:\/\//i.test(url);
+  img.classList.add('hidden');
+  if (usable) {
+    img.onerror = () => { wrap.style.display = 'none'; };
+    img.onload = () => { wrap.style.display = 'block'; img.classList.remove('hidden'); };
+    img.src = url;
+  } else {
+    img.onerror = null; img.onload = null; img.removeAttribute('src');
+    wrap.style.display = 'none';
+  }
+}
+
 function showDetails(ch, p) {
   $('dTitle').textContent = p.title || ch.name;
   $('dSub').textContent = ch.name + (p.cat ? ' · ' + p.cat : '');
   $('dTime').textContent = (p.start && p.stop) ? (fmtTime(p.start) + ' – ' + fmtTime(p.stop)) : '';
   $('dDesc').textContent = p.desc || 'No synopsis available.';
   $('dList').innerHTML = '';
+  setDrawerIcon((p.icon && p.icon.trim()) || (ch.logo && ch.logo.trim()));
+  renderMeta(p, ch);
   $('dPlay').onclick = () => { playChannel(ch); };
   openDetails();
 }
@@ -589,6 +656,8 @@ function showChannelDetails(ch) {
   $('dSub').textContent = (ch.group ? ch.group : '') + (ch.epg ? ' · has EPG' : ' · no EPG');
   $('dTime').textContent = np ? ('Now: ' + np.title + '  ' + fmtTime(np.start) + '–' + fmtTime(np.stop)) : '';
   $('dDesc').textContent = np ? (np.desc || '') : 'No program information available for this channel.';
+  setDrawerIcon((np && np.icon && np.icon.trim()) || (ch.logo && ch.logo.trim()));
+  renderMeta(np, ch);
   // upcoming program list
   const now = Date.now();
   const upcoming = (ch.programs || []).filter(p => p.stop > now).slice(0, 10);
