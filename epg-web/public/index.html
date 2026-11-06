@@ -1451,12 +1451,19 @@ function toggleStats() {
   const on = ov.style.display !== 'block';
   ov.style.display = on ? 'block' : 'none';
   if (on) {
+    ensureCodecs();
     clearInterval(statsTimer);
     statsTimer = setInterval(updateStats, 500);
     updateStats();
   } else {
     clearInterval(statsTimer); statsTimer = null;
   }
+}
+async function fetchRelayInfo() {
+  try { const j = await (await fetch('/relayinfo')).json(); if (j.codecs && (j.codecs.video || j.codecs.audio)) window._codecs = j.codecs; } catch (_) {}
+}
+function ensureCodecs() {
+  if (!window._codecs || !(window._codecs.video || window._codecs.audio)) fetchRelayInfo();
 }
 function updateStats() {
   const v = $('wpVideo');
@@ -1479,8 +1486,8 @@ function updateStats() {
   const health = ahead >= 20 ? 'Good' : ahead >= 10 ? 'Medium' : ahead >= 3 ? 'Low' : 'Critical';
   const healthPct = Math.min(100, Math.round(ahead / 30 * 100));
 
-  let dropped = '?';
-  try { dropped = v.getVideoPlaybackQuality ? v.getVideoPlaybackQuality().droppedFrames : '?'; } catch (_) {}
+  let dropped = 'n/a';
+  try { const q = v.getVideoPlaybackQuality && v.getVideoPlaybackQuality(); dropped = (q && q.droppedFrames != null) ? q.droppedFrames : 'n/a'; } catch (_) {}
   if (v.requestVideoFrameCallback) { try { v.requestVideoFrameCallback(() => { frameCount++; }); } catch (_) {} }
   const res = (v.videoWidth || '?') + '×' + (v.videoHeight || '?');
   const cc = window._codecs || {};

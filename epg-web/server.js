@@ -567,6 +567,7 @@ let mp4Child = null;
 let mp4File = null;
 let mp4Slug = null;
 let mp4BufferMs = 30000;
+let mp4Head = [];   // accumulated ffmpeg stderr (all) for codec parsing
 
 // Shared bitrate estimate (bytes/sec) of the relay output, used to size the
 // pre-roll and buffer windows in wall-clock terms.
@@ -599,8 +600,9 @@ function startMp4Relay(url, opts) {
     const bufferMs = opts && opts.bufferMs ? Math.min(90000, Math.max(5000, +opts.bufferMs)) : 30000;
     const preRollSec = 10;   // buffer this much before starting playback
     brReset();
+    mp4Head = [];
     const codecs = () => {
-      const text = headLines.join('\n');
+      const text = mp4Head.join('\n');
       let video = '', audio = '', res = '';
       const vm = text.match(/Video:\s*([^\s,]+)/); if (vm) video = vm[1];
       const am = text.match(/Audio:\s*([^\s,]+)/); if (am) audio = am[1];
@@ -629,7 +631,7 @@ function startMp4Relay(url, opts) {
     const headLines = [];
     child.stderr.on('data', d => {
       const s = String(d);
-      if (headLines.length < 30) headLines.push(s);
+      if (mp4Head.join('').length < 200000) mp4Head.push(s); // keep all for codec parse
       errLines.push(s); if (errLines.length > 40) errLines.shift();
     });
     let settled = false;
@@ -1139,6 +1141,16 @@ const server = http.createServer(async (req, res) => {
       if (typeof url !== 'string' || !url.trim()) throw Object.assign(new Error('url is required'), { status: 400 });
       const r = await startRelay(url);
       return sendJSON(res, 200, r);
+    }
+
+    // Current relay codec info (for Stats-for-nerds).
+    if (p === '/relayinfo' && req.method === 'GET') {
+      const text = mp4Head.join('\n');
+      let video = '', audio = '', resStr = '';
+      const vm = text.match(/Video:\s*([^\s,]+)/); if (vm) video = vm[1];
+      const am = text.match(/Audio:\s*([^\s,]+)/); if (am) audio = am[1];
+      const rm = text.match(/(\d{2,5})x(\d{2,5})/); if (rm) resStr = rm[1] + '×' + rm[2];
+      return sendJSON(res, 200, { active: !!mp4Child, codecs: { video, audio, res: resStr } });
     }
 
     // Start an FFmpeg MP4 relay (native, blob-free web playback).
