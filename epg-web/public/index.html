@@ -399,6 +399,10 @@
       </label>
     </div>
     <div class="p-row">
+      <span class="p-lbl">Network cache (ms) — raise if video drops after a few seconds</span>
+      <input type="number" id="netCache" min="300" max="10000" step="100" style="width:100%;padding:7px 10px;border-radius:8px;border:1px solid var(--border);background:var(--panel2);color:var(--text);font-size:13px">
+    </div>
+    <div class="p-row">
       <span class="p-lbl">Preferred language</span>
       <select id="prefLang" class="pref-lang"></select>
       <div style="margin-top:6px;font-size:12px;color:var(--muted)" id="langHint"></div>
@@ -420,7 +424,7 @@
 <script>
 const $ = id => document.getElementById(id);
 const stage = $('stage');
-const state = { channels: [], groups: [], now: Date.now(), fav: new Set(), current: null, dfmt: 'DMY', sel: null, view: [], lang: 'en', translate: false, fullscreen: false };
+const state = { channels: [], groups: [], now: Date.now(), fav: new Set(), current: null, dfmt: 'DMY', sel: null, view: [], lang: 'en', translate: false, fullscreen: false, netCache: 2000 };
 let timer = null, toastTimer = null, activeLoadId = 0;
 const LS_SOURCES = 'vlcEpgSources';
 const LS_FAV = 'vlcEpgFavorites';
@@ -429,6 +433,7 @@ const LS_TV = 'vlcEpgTvMode';
 const LS_LANG = 'vlcEpgLang';
 const LS_TRANS = 'vlcEpgTranslate';
 const LS_FS = 'vlcEpgFullscreen';
+const LS_NETCACHE = 'vlcEpgNetCache';
 
 function storageGet(key, fallback) {
   try { const value = localStorage.getItem(key); return value == null ? fallback : value; }
@@ -751,6 +756,7 @@ function openSettings() {
   });
   $('tvMode').checked = document.body.classList.contains('tv');
   $('fsMode').checked = state.fullscreen;
+  $('netCache').value = state.netCache;
   $('autoTranslate').checked = state.translate;
   fillLangSelect();
   $('overlay').classList.add('open');
@@ -763,6 +769,15 @@ $('fsMode').addEventListener('change', e => {
   state.fullscreen = e.target.checked;
   storageSet(LS_FS, state.fullscreen ? '1' : '0');
   toast('Channels open ' + (state.fullscreen ? 'fullscreen' : 'in a window'));
+});
+$('netCache').addEventListener('change', e => {
+  let v = parseInt(e.target.value, 10);
+  if (!v || v < 300) v = 300;
+  if (v > 10000) v = 10000;
+  state.netCache = v;
+  e.target.value = v;
+  storageSet(LS_NETCACHE, String(v));
+  toast('Network cache: ' + v + ' ms');
 });
 $('autoTranslate').addEventListener('change', e => {
   state.translate = e.target.checked;
@@ -1093,7 +1108,7 @@ function playChannel(ch) {
   if (!ch || !ch.url) { toast('No stream URL for this channel', true); return; }
   state.current = { url: ch.url, name: ch.name };
   render();
-  Promise.resolve(post('/play', { url: ch.url, name: ch.name, fullscreen: state.fullscreen }))
+  Promise.resolve(post('/play', { url: ch.url, name: ch.name, fullscreen: state.fullscreen, networkCaching: state.netCache }))
     .then(() => {
       updateNowBar(ch);
       toast('▶ ' + ch.name);
@@ -1389,6 +1404,7 @@ loadTv();
 try { const l = storageGet(LS_LANG, 'en'); if (/^[a-z]{2,3}$/.test(l)) state.lang = l; } catch (_) {}
 state.translate = storageGet(LS_TRANS, '0') === '1';
 state.fullscreen = storageGet(LS_FS, '0') === '1';
+try { const nc = parseInt(storageGet(LS_NETCACHE, '2000'), 10); if (nc >= 300 && nc <= 10000) state.netCache = nc; } catch (_) {}
 refreshSavedDropdown('');
 </script>
 </body>
