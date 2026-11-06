@@ -239,6 +239,10 @@
   .panel .p-actions { display:flex; gap:8px; margin-top:16px; justify-content:flex-end; }
   .panel .pref-lang { width:100%; padding:7px 10px; border-radius:8px; border:1px solid var(--border);
     background:var(--panel2); color:var(--text); font-size:13px; }
+  .panel .p-section { font-size:11px; text-transform:uppercase; letter-spacing:.6px;
+    color:var(--accent2); margin:2px 0 8px; font-weight:700; }
+  .panel .p-divider { color:var(--muted); font-size:13px; text-align:center; letter-spacing:2px;
+    padding:10px 0 8px; border-top:1px solid var(--border); margin-top:4px; user-select:none; }
 
   /* Production polish */
   :root {
@@ -401,7 +405,9 @@
 <div class="overlay" id="overlay" role="presentation">
   <div class="panel" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
     <h2 id="settingsTitle">Settings</h2>
-    <div class="p-sub">Display preferences</div>
+    <div class="p-sub">Use the dividers to group related options.</div>
+
+    <div class="p-section">Playback</div>
     <div class="p-row">
       <span class="p-lbl">Player</span>
       <select id="playerSel" class="pref-lang">
@@ -409,6 +415,23 @@
         <option value="web">Web player</option>
       </select>
     </div>
+    <div class="p-row">
+      <span class="p-lbl">Network cache (ms) — raise if video drops after a few seconds</span>
+      <input type="number" id="netCache" min="300" max="10000" step="100" style="width:100%;padding:7px 10px;border-radius:8px;border:1px solid var(--border);background:var(--panel2);color:var(--text);font-size:13px">
+    </div>
+    <div class="p-row">
+      <label class="fmt-opt" style="display:inline-flex;gap:8px">
+        <input type="checkbox" id="fsMode"> Open channels in fullscreen
+      </label>
+    </div>
+    <div class="p-row">
+      <label class="fmt-opt" style="display:inline-flex;gap:8px">
+        <input type="checkbox" id="relayMode"> Use FFmpeg relay (fixes streams that drop, e.g. Pluto)
+      </label>
+    </div>
+
+    <div class="p-divider">______________</div>
+    <div class="p-section">Display</div>
     <div class="p-row">
       <span class="p-lbl">Date format</span>
       <div class="fmt-opts" id="fmtOpts">
@@ -422,20 +445,9 @@
         <input type="checkbox" id="tvMode"> TV mode (bigger UI for remote / distance)
       </label>
     </div>
-    <div class="p-row">
-      <label class="fmt-opt" style="display:inline-flex;gap:8px">
-        <input type="checkbox" id="fsMode"> Open channels in fullscreen
-      </label>
-    </div>
-    <div class="p-row">
-      <span class="p-lbl">Network cache (ms) — raise if video drops after a few seconds</span>
-      <input type="number" id="netCache" min="300" max="10000" step="100" style="width:100%;padding:7px 10px;border-radius:8px;border:1px solid var(--border);background:var(--panel2);color:var(--text);font-size:13px">
-    </div>
-    <div class="p-row">
-      <label class="fmt-opt" style="display:inline-flex;gap:8px">
-        <input type="checkbox" id="relayMode"> Use FFmpeg relay (fixes streams that drop, e.g. Pluto)
-      </label>
-    </div>
+
+    <div class="p-divider">______________</div>
+    <div class="p-section">Language &amp; translation</div>
     <div class="p-row">
       <span class="p-lbl">Preferred language</span>
       <select id="prefLang" class="pref-lang"></select>
@@ -447,6 +459,7 @@
       </label>
       <button class="btn ghost small" id="retranslate" style="margin-top:8px" title="Clear the translation cache and re-translate the visible programmes">⟳ Retranslate now</button>
     </div>
+
     <div class="p-actions">
       <button class="btn ghost" id="settClose">Close</button>
     </div>
@@ -1212,8 +1225,9 @@ function playChannel(ch) {
     });
 }
 
-// Web player: plays the FFmpeg-relayed HLS in a <video> with hls.js,
-// including automatic error recovery (useful for streams that stall/drop).
+// Web player: plays a relayed stream in a <video>. Prefers the native
+// fragmented-MP4 relay (no blob/MSE, so it works even where CSP blocks
+// blob: media); falls back to the HLS relay via hls.js when available.
 async function playWeb(ch) {
   if (!ch || !ch.url) { toast('No stream URL for this channel', true); return; }
   const $p = $('webplayer'), vid = $('wpVideo');
@@ -1222,40 +1236,49 @@ async function playWeb(ch) {
   if (hlsPlayer) { try { hlsPlayer.destroy(); } catch (_) {} hlsPlayer = null; }
   vid.pause(); vid.removeAttribute('src'); vid.load();
   try {
-    const r = await post('/stream', { url: ch.url });
-    const src = r.playUrl;
-    if (window.Hls && Hls.isSupported()) {
-      hlsPlayer = new Hls({ maxBufferLength: 30, enableWorker: true });
-      hlsPlayer.loadSource(src);
-      hlsPlayer.attachMedia(vid);
-      hlsPlayer.on(Hls.Events.MANIFEST_PARSED, () => vid.play().catch(() => {}));
-      hlsPlayer.on(Hls.Events.ERROR, (e, data) => {
-        if (!data.fatal) return;
-        if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-          console.warn('hls network error -> reload', data.details);
-          hlsPlayer.startLoad();
-        } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
-          hlsPlayer.recoverMediaError();
-        } else {
-          toast('Stream error: ' + data.details, true);
-        }
-      });
-    } else if (vid.canPlayType('application/vnd.apple.mpegurl')) {
-      vid.src = src; vid.play().catch(() => {});
-    } else {
-      toast('This browser/environment cannot play the relayed HLS — use VLC.', true);
-      closeWeb();
-      return;
-    }
+    // Try native MP4 relay first.
+    const r4 = await post('/streammp4', { url: ch.url });
+    vid.src = r4.url;
+    vid.play().catch(() => {});
+    vid.onerror = () => {
+      // Fall back to HLS relay if the native MP4 path isn't supported.
+      if (vid.error && vid.error.code === 4) {
+        vid.onerror = null;
+        startHlsPlay(ch);
+      }
+    };
     state.current = { url: ch.url, name: ch.name };
   } catch (e) {
-    toast('Web player failed: ' + e.message, true);
-    closeWeb();
+    // MP4 relay failed -> try HLS relay.
+    try { await startHlsPlay(ch); }
+    catch (e2) { toast('Web player failed: ' + e2.message, true); closeWeb(); }
   }
+}
+async function startHlsPlay(ch) {
+  const vid = $('wpVideo');
+  const r = await post('/stream', { url: ch.url });
+  const src = r.playUrl;
+  if (window.Hls && Hls.isSupported()) {
+    hlsPlayer = new Hls({ maxBufferLength: 30, enableWorker: true });
+    hlsPlayer.loadSource(src);
+    hlsPlayer.attachMedia(vid);
+    hlsPlayer.on(Hls.Events.MANIFEST_PARSED, () => vid.play().catch(() => {}));
+    hlsPlayer.on(Hls.Events.ERROR, (e, data) => {
+      if (!data.fatal) return;
+      if (data.type === Hls.ErrorTypes.NETWORK_ERROR) hlsPlayer.startLoad();
+      else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) hlsPlayer.recoverMediaError();
+      else toast('Stream error: ' + data.details, true);
+    });
+  } else if (vid.canPlayType('application/vnd.apple.mpegurl')) {
+    vid.src = src; vid.play().catch(() => {});
+  } else {
+    throw new Error('no usable HLS path');
+  }
+  state.current = { url: ch.url, name: ch.name };
 }
 function closeWeb() {
   if (hlsPlayer) { try { hlsPlayer.destroy(); } catch (_) {} hlsPlayer = null; }
-  const vid = $('wpVideo'); vid.pause(); vid.removeAttribute('src'); vid.load();
+  const vid = $('wpVideo'); vid.pause(); vid.removeAttribute('src'); vid.load(); vid.onerror = null;
   $('webplayer').style.display = 'none';
   post('/stop', {}).catch(() => {});
 }

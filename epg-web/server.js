@@ -555,7 +555,82 @@ function playRelay(url, opts) {
 function stopPlay() {
   if (vlcChild) { try { vlcChild.kill(); } catch (_) {} vlcChild = null; }
   stopRelay();
+  stopMp4Relay();
   return { stopped: true };
+}
+
+/* ---------- MP4 relay (blob-free web playback) ---------- */
+// Re-streams the upstream as a fragmented MP4 that a native <video> can play
+// progressively without MediaSource/blob (works even where CSP blocks blob:).
+let mp4Child = null;
+let mp4File = null;
+let mp4Slug = null;
+function stopMp4Relay() {
+  if (mp4Child) { try { mp4Child.kill(); } catch (_) {} mp4Child = null; }
+  if (mp4File) { try { fs.rmSync(mp4File, { force: true }); } catch (_) {} mp4File = null; }
+  mp4Slug = null;
+}
+function startMp4Relay(url) {
+  return new Promise((resolve, reject) => {
+    if (!FFMPEG) return reject(new Error('FFmpeg is not available on this system'));
+    stopMp4Relay();
+    const slug = 'm' + Date.now().toString(36);
+    const dir = path.join(RELAY_DIR, slug);
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, 'live.mp4');
+    const args = [
+      '-hide_banner', '-loglevel', 'error', '-nostdin',
+      '-user_agent', DEFAULT_UA,
+      '-headers', 'X-Forwarded-For: 102.88.71.139\r\n',
+      '-rw_timeout', '15000000',
+      '-i', url,
+      '-c', 'copy',
+      '-f', 'mp4',
+      '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
+      file,
+    ];
+    let child;
+    try { child = spawn(FFMPEG, args, { detached: false }); }
+    catch (e) { return reject(new Error('failed to start FFmpeg: ' + e.message)); }
+    mp4Child = child; mp4File = file; mp4Slug = slug;
+    const errLines = [];
+    child.stderr.on('data', d => { errLines.push(String(d)); if (errLines.length > 40) errLines.shift(); });
+    let settled = false;
+    const fail = msg => { if (settled) return; settled = true; stopMp4Relay(); const er = new Error(msg); er.status = 422; reject(er); };
+    const done = () => { if (settled) return; settled = true; resolve({ url: `http://127.0.0.1:${PORT}/relaymp4/${slug}/live.mp4`, relay: true, slug }); };
+    child.on('error', e => fail('FFmpeg failed to start: ' + e.message));
+    child.on('exit', code => {
+      if (mp4Child === child) mp4Child = null;
+      setTimeout(() => { if (!fs.existsSync(file) || fs.statSync(file).size < 4096) fail('FFmpeg exited (code ' + code + ') ' + errLines.join(' ').slice(-200)); }, 60);
+    });
+    const t0 = Date.now();
+    const wait = setInterval(() => {
+      if (fs.existsSync(file) && fs.statSync(file).size >= 4096) { clearInterval(wait); done(); }
+      else if (Date.now() - t0 > 20000) { clearInterval(wait); fail('MP4 relay timed out: ' + errLines.join(' ').slice(-200)); }
+    }, 300);
+  });
+}
+// Stream a growing file to res (progressive, chunked, no content-length).
+function streamGrowingFile(res, file) {
+  let start = 0;
+  res.writeHead(200, { 'Content-Type': 'video/mp4', 'Transfer-Encoding': 'chunked', 'Cache-Control': 'no-store' });
+  const pump = () => {
+    if (res.writableEnded) return;
+    try {
+      const st = fs.statSync(file);
+      if (st.size > start) {
+        const fd = fs.openSync(file, 'r');
+        const buf = Buffer.alloc(st.size - start);
+        fs.readSync(fd, buf, 0, buf.length, start);
+        fs.closeSync(fd);
+        start = st.size;
+        res.write(buf);
+      }
+    } catch (_) {}
+  };
+  const iv = setInterval(pump, 500);
+  pump();
+  res.on('close', () => clearInterval(iv));
 }
 
 /* ------------------------------------------------------------------ */
@@ -949,6 +1024,16 @@ const server = http.createServer(async (req, res) => {
       return sendJSON(res, 200, r);
     }
 
+    // Start an FFmpeg MP4 relay (native, blob-free web playback).
+    if (p === '/streammp4' && req.method === 'POST') {
+      if (req.headers['content-type']?.split(';')[0].trim() !== 'application/json')
+        throw Object.assign(new Error('content-type must be application/json'), { status: 415 });
+      const { url } = parseJSON(await readBody(req));
+      if (typeof url !== 'string' || !url.trim()) throw Object.assign(new Error('url is required'), { status: 400 });
+      const r = await startMp4Relay(url);
+      return sendJSON(res, 200, r);
+    }
+
     if (p === '/stop' && req.method === 'POST') {
       if (req.headers['content-type']?.split(';')[0].trim() !== 'application/json')
         throw Object.assign(new Error('content-type must be application/json'), { status: 415 });
@@ -1021,6 +1106,15 @@ const server = http.createServer(async (req, res) => {
         res.writeHead(200, { 'Content-Type': type, 'Content-Length': buf.length, 'Cache-Control': 'no-store' });
         res.end(buf);
       });
+      return;
+    }
+
+    // Stream the growing MP4 relay file (native web playback).
+    if (p.startsWith('/relaymp4/')) {
+      const rel = p.slice('/relaymp4/'.length);
+      const abs = path.join(RELAY_DIR, path.normalize(rel));
+      if (!abs.startsWith(RELAY_DIR + path.sep) || !fs.existsSync(abs)) return sendJSON(res, 404, { error: 'not found' });
+      streamGrowingFile(res, abs);
       return;
     }
 
