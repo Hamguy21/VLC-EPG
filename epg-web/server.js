@@ -599,8 +599,16 @@ function startMp4Relay(url, opts) {
     const bufferMs = opts && opts.bufferMs ? Math.min(90000, Math.max(5000, +opts.bufferMs)) : 30000;
     const preRollSec = 10;   // buffer this much before starting playback
     brReset();
+    const codecs = () => {
+      const text = headLines.join('\n');
+      let video = '', audio = '', res = '';
+      const vm = text.match(/Video:\s*([^\s,]+)/); if (vm) video = vm[1];
+      const am = text.match(/Audio:\s*([^\s,]+)/); if (am) audio = am[1];
+      const rm = text.match(/(\d{2,5})x(\d{2,5})/); if (rm) res = rm[1] + '×' + rm[2];
+      return { video, audio, res };
+    };
     const args = [
-      '-hide_banner', '-loglevel', 'error', '-nostdin',
+      '-hide_banner', '-loglevel', 'info', '-nostdin',
       '-user_agent', DEFAULT_UA,
       '-headers', 'X-Forwarded-For: 102.88.71.139\r\n',
       '-rw_timeout', '15000000',
@@ -618,10 +626,15 @@ function startMp4Relay(url, opts) {
     catch (e) { return reject(new Error('failed to start FFmpeg: ' + e.message)); }
     mp4Child = child; mp4File = file; mp4Slug = slug; mp4BufferMs = bufferMs;
     const errLines = [];
-    child.stderr.on('data', d => { errLines.push(String(d)); if (errLines.length > 40) errLines.shift(); });
+    const headLines = [];
+    child.stderr.on('data', d => {
+      const s = String(d);
+      if (headLines.length < 30) headLines.push(s);
+      errLines.push(s); if (errLines.length > 40) errLines.shift();
+    });
     let settled = false;
     const fail = msg => { if (settled) return; settled = true; stopMp4Relay(); const er = new Error(msg); er.status = 422; reject(er); };
-    const done = () => { if (settled) return; settled = true; resolve({ url: `http://127.0.0.1:${PORT}/relaymp4/${slug}/live.mp4`, relay: true, slug }); };
+    const done = () => { if (settled) return; settled = true; resolve({ url: `http://127.0.0.1:${PORT}/relaymp4/${slug}/live.mp4`, relay: true, slug, codecs: codecs() }); };
     child.on('error', e => fail('FFmpeg failed to start: ' + e.message));
     child.on('exit', code => {
       if (mp4Child === child) mp4Child = null;
