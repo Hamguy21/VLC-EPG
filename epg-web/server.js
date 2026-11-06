@@ -640,7 +640,8 @@ function startMp4Relay(url, opts) {
       '-i', url,
     ];
     if (tc) {
-      args.push('-map', '0:v:0', '-map', '0:a:0', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-c:a', 'aac', '-b:a', '160k');
+      args.push('-map', '0:v:0', '-map', '0:a:0', '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28',
+        '-c:a', 'aac', '-b:a', '128k');
     } else {
       args.push('-c', 'copy', '-bsf:a', 'aac_adtstoasc'); // remux HLS AAC -> MP4
     }
@@ -679,8 +680,9 @@ function startMp4Relay(url, opts) {
       brSample(sz);
       const preRollBytes = brBps() * preRollSec;
       const ready = sz >= Math.max(262144, Math.min(preRollBytes, brBps() * 60));
+      const limit = tc ? 120000 : 60000;
       if (ready) { clearInterval(wait); done(); }
-      else if (elapsed > 60000) { clearInterval(wait); const m = 'MP4 relay timed out: ' + errLines.join(' ').slice(-200); sev('relay_timeout', { slug, msg: m }); fail(m); }
+      else if (elapsed > limit) { clearInterval(wait); const m = 'MP4 relay timed out: ' + errLines.join(' ').slice(-200); sev('relay_timeout', { slug, msg: m }); fail(m); }
     }, 300);
   });
 }

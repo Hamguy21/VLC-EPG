@@ -1352,11 +1352,14 @@ async function playWeb(ch) {
   vid.pause(); vid.removeAttribute('src'); vid.load();
   vid._reconnects = 0;
   vid._triedTc = false;
-  try {
-    await startMp4(ch);
-  } catch (e) {
-    dbgLog('mp4_failed', { msg: e.message });
-    try { dbgLog('hls_fallback', {}); await startHlsPlay(ch); }
+  let mp4Err = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try { await startMp4(ch); mp4Err = null; break; }
+    catch (e) { mp4Err = e; dbgLog('mp4_failed', { msg: e.message, attempt }); if (attempt === 0) await new Promise(r => setTimeout(r, 2000)); }
+  }
+  if (mp4Err) {
+    dbgLog('hls_fallback', {});
+    try { await startHlsPlay(ch); }
     catch (e2) { showLoader(false); dbgLog('web_failed', { msg: e2.message }); toast('Web player failed: ' + e2.message, true); closeWeb(); }
   }
 }
