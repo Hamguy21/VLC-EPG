@@ -570,6 +570,7 @@ let mp4Slug = null;
 let mp4BufferMs = 30000;
 let mp4Head = [];   // accumulated ffmpeg stderr (all) for codec parsing
 let mp4LiveMbps = 0;  // measured delivery throughput to the web client (Mbps)
+let mp4Eof = false;    // set when the feed ended early (clean EOF shortly after start)
 let serverEvents = []; // ring buffer of server-side diagnostic events
 function sev(msg, extra) {
   try { serverEvents.push(Object.assign({ t: Date.now(), msg }, extra || {})); if (serverEvents.length > 400) serverEvents.shift(); } catch (_) {}
@@ -594,6 +595,7 @@ function stopMp4Relay() {
   if (mp4File) { try { fs.rmSync(mp4File, { force: true }); } catch (_) {} mp4File = null; }
   mp4Slug = null;
   mp4LiveMbps = 0;
+  mp4Eof = false;
 }
 function startMp4Relay(url, opts) {
   return new Promise((resolve, reject) => {
@@ -609,6 +611,7 @@ function startMp4Relay(url, opts) {
     brReset();
     mp4Head = [];
     mp4LiveMbps = 0;
+    mp4Eof = false;
     const codecs = () => {
       const text = mp4Head.join('\n');
       let video = '', audio = '', res = '';
@@ -649,7 +652,11 @@ function startMp4Relay(url, opts) {
     child.on('error', e => { sev('relay_error', { slug, msg: e.message }); fail('FFmpeg failed to start: ' + e.message); });
     child.on('exit', code => {
       if (mp4Child === child) mp4Child = null;
-      sev('relay_exit', { slug, code });
+      const ms = Date.now() - tStart;
+      sev('relay_exit', { slug, code, ms });
+      // Clean exit shortly after start = the upstream feed ended (EOF), not a
+      // network blip. Flag it so the client can stop the reconnect loop.
+      if (code === 0 && ms < 30000) { mp4Eof = true; sev('relay_eof', { slug, ms }); }
       setTimeout(() => { if (!fs.existsSync(file) || fs.statSync(file).size < 4096) fail('FFmpeg exited (code ' + code + ') ' + errLines.join(' ').slice(-200)); }, 60);
     });
     const t0 = Date.now();
@@ -1165,7 +1172,7 @@ const server = http.createServer(async (req, res) => {
       const vm = text.match(/Video:\s*([^\s,]+)/); if (vm) video = vm[1];
       const am = text.match(/Audio:\s*([^\s,]+)/); if (am) audio = am[1];
       const rm = text.match(/(\d{2,5})x(\d{2,5})/); if (rm) resStr = rm[1] + '×' + rm[2];
-      return sendJSON(res, 200, { active: !!mp4Child, connectionMbps: mp4LiveMbps, codecs: { video, audio, res: resStr } });
+      return sendJSON(res, 200, { active: !!mp4Child, ended: mp4Eof, connectionMbps: mp4LiveMbps, codecs: { video, audio, res: resStr } });
     }
 
     // Start an FFmpeg MP4 relay (native, blob-free web playback).
