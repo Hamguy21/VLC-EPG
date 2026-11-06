@@ -854,19 +854,31 @@ const server = http.createServer(async (req, res) => {
       return sendJSON(res, 200, result);
     }
 
-    // Translate text to a target language (best-effort, free Google endpoint).
+    // Translate text to a target language (best-effort). Uses MyMemory
+    // (free, auto-detect) with Google as a fallback.
     if (p === '/translate' && req.method === 'POST') {
       const { text, to } = parseJSON(await readBody(req));
       if (typeof text !== 'string' || !text.trim()) throw Object.assign(new Error('text is required'), { status: 400 });
       if (typeof to !== 'string' || !/^[a-z]{2,3}(-[A-Za-z]{2,4})?$/.test(to)) throw Object.assign(new Error('invalid target language'), { status: 400 });
       const q = encodeURIComponent(text.slice(0, 1500));
-      const u = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${to}&dt=t&q=${q}`;
-      const buf = await fetchBuffer(u, 12000);
-      const data = JSON.parse(buf.toString('utf-8'));
-      const out = Array.isArray(data) && Array.isArray(data[0])
-        ? data[0].map(seg => (seg && seg[0]) || '').join('')
+      // Try MyMemory first (auto-detect source).
+      try {
+        const u = `https://api.mymemory.translated.net/get?q=${q}&langpair=autodetect|${to}`;
+        const buf = await fetchBuffer(u, 12000);
+        const data = JSON.parse(buf.toString('utf-8'));
+        const out = data && data.responseData && data.responseData.translatedText;
+        if (out && String(out).trim() && !/MYMEMORY WARNING/i.test(out)) {
+          return sendJSON(res, 200, { text: out, from: (data.responseData.detectedLanguage) || 'auto' });
+        }
+      } catch (_) { /* fall through to google */ }
+      // Fallback: Google translate (auto-detect).
+      const g = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${to}&dt=t&q=${q}`;
+      const gbuf = await fetchBuffer(g, 12000);
+      const gdata = JSON.parse(gbuf.toString('utf-8'));
+      const gout = Array.isArray(gdata) && Array.isArray(gdata[0])
+        ? gdata[0].map(seg => (seg && seg[0]) || '').join('')
         : text;
-      return sendJSON(res, 200, { text: out, from: (data && data[2]) || 'auto' });
+      return sendJSON(res, 200, { text: gout, from: (gdata && gdata[2]) || 'auto' });
     }
 
     return sendJSON(res, 404, { error: 'not found' });
