@@ -437,6 +437,17 @@ let vlcChild = null;
 // cache, and add a live cache so ad-transition stalls don't drop the stream.
 const DEFAULT_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36';
 
+// Extra HTTP headers for relay fetches. Pluto's stitch live feed keeps a
+// longer session when the request carries a matching Referer/Origin.
+function relayHeaders(url) {
+  let h = 'X-Forwarded-For: 102.88.71.139\r\n';
+  try {
+    const u = new URL(url);
+    if (/(^|\.)pluto\.tv$/i.test(u.hostname)) h += 'Referer: https://pluto.tv/\r\nOrigin: https://pluto.tv\r\n';
+  } catch (_) {}
+  return h;
+}
+
 function launchVlc(url, name, fullscreen, hw) {
   return new Promise((resolve, reject) => {
     if (vlcChild) { try { vlcChild.kill(); } catch (_) {} vlcChild = null; }
@@ -496,7 +507,7 @@ function startRelay(url) {
     const args = [
       '-hide_banner', '-loglevel', 'error', '-nostdin',
       '-user_agent', DEFAULT_UA,
-      '-headers', 'X-Forwarded-For: 102.88.71.139\r\n',
+      '-headers', relayHeaders(url),
       '-rw_timeout', '15000000',   // 15s network I/O timeout
       '-i', url,
       '-c', 'copy',
@@ -620,20 +631,22 @@ function startMp4Relay(url, opts) {
       const rm = text.match(/(\d{2,5})x(\d{2,5})/); if (rm) res = rm[1] + '×' + rm[2];
       return { video, audio, res };
     };
+    const tc = !!(opts && opts.tc);   // transcode to h264+aac for compatibility
     const args = [
       '-hide_banner', '-loglevel', 'info', '-nostdin',
       '-user_agent', DEFAULT_UA,
-      '-headers', 'X-Forwarded-For: 102.88.71.139\r\n',
+      '-headers', relayHeaders(url),
       '-rw_timeout', '15000000',
       '-i', url,
-      '-c', 'copy',
-      '-bsf:a', 'aac_adtstoasc',   // required when remuxing HLS AAC -> MP4
-      '-fflags', '+genpts+flush_packets',
-      '-f', 'mp4',
-      '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
-      '-frag_duration', '500000',   // force a fragment every ~0.5s
-      file,
     ];
+    if (tc) {
+      args.push('-map', '0:v:0', '-map', '0:a:0', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-c:a', 'aac', '-b:a', '160k');
+    } else {
+      args.push('-c', 'copy', '-bsf:a', 'aac_adtstoasc'); // remux HLS AAC -> MP4
+    }
+    args.push('-fflags', '+genpts+flush_packets', '-f', 'mp4',
+      '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
+      '-frag_duration', '500000', file);
     let child;
     try { child = spawn(FFMPEG, args, { detached: false }); }
     catch (e) { return reject(new Error('failed to start FFmpeg: ' + e.message)); }
@@ -1179,9 +1192,9 @@ const server = http.createServer(async (req, res) => {
     if (p === '/streammp4' && req.method === 'POST') {
       if (req.headers['content-type']?.split(';')[0].trim() !== 'application/json')
         throw Object.assign(new Error('content-type must be application/json'), { status: 415 });
-      const { url, buffer } = parseJSON(await readBody(req));
+      const { url, buffer, tc } = parseJSON(await readBody(req));
       if (typeof url !== 'string' || !url.trim()) throw Object.assign(new Error('url is required'), { status: 400 });
-      const r = await startMp4Relay(url, { bufferMs: (Number(buffer) || 30) * 1000 });
+      const r = await startMp4Relay(url, { bufferMs: (Number(buffer) || 30) * 1000, tc: !!tc });
       return sendJSON(res, 200, r);
     }
 
