@@ -343,6 +343,13 @@ function parseXMLTV(text) {
     if (start == null || stop == null || stop <= start) continue;
     const title = ((body.match(/<title[^>]*>([\s\S]*?)<\/title>/) || [])[1] || '').trim();
     const desc = ((body.match(/<desc[^>]*>([\s\S]*?)<\/desc>/) || [])[1] || '').trim();
+    // Collect all language variants so the UI can pick a preferred language.
+    const titles = [];
+    for (const t of body.matchAll(/<title[^>]*lang="([^"]*)"[^>]*>([\s\S]*?)<\/title>/g)) titles.push({ lang: t[1], text: dec(t[2].trim()) });
+    if (!titles.some(t => t.text === title)) titles.unshift({ lang: (title.match(/\blang="([^"]*)"/) || [])[1] || '', text: dec(title) });
+    const descs = [];
+    for (const d of body.matchAll(/<desc[^>]*lang="([^"]*)"[^>]*>([\s\S]*?)<\/desc>/g)) descs.push({ lang: d[1], text: dec(d[2].trim()) });
+    if (!descs.some(d => d.text === desc)) descs.unshift({ lang: '', text: dec(desc) });
     const cat = ((body.match(/<category[^>]*>([\s\S]*?)<\/category>/) || [])[1] || '').trim();
     const icon = ((body.match(/<icon[^>]*src="([^"]*)"/) || [])[1] || '').trim();
     const sub = ((body.match(/<sub-title[^>]*>([\s\S]*?)<\/sub-title>/) || [])[1] || '').trim();
@@ -364,7 +371,7 @@ function parseXMLTV(text) {
     (programs[chId] = programs[chId] || []).push({
       start, stop, title: dec(title), desc: dec(desc), cat: dec(cat), icon: dec(icon),
       sub: dec(sub), year: dec(year), lang, rating: dec(ratingVal),
-      episodeNums, directors: directors.map(dec), actors: actors.map(dec),
+      titles, descs, episodeNums, directors: directors.map(dec), actors: actors.map(dec),
       audio: audio.map(dec).filter(Boolean),
     });
   }
@@ -845,6 +852,21 @@ const server = http.createServer(async (req, res) => {
       if (typeof m3u !== 'string' || !m3u.trim()) throw Object.assign(new Error('m3u is required'), { status: 400 });
       const result = await grabEPG(m3u, countries);
       return sendJSON(res, 200, result);
+    }
+
+    // Translate text to a target language (best-effort, free Google endpoint).
+    if (p === '/translate' && req.method === 'POST') {
+      const { text, to } = parseJSON(await readBody(req));
+      if (typeof text !== 'string' || !text.trim()) throw Object.assign(new Error('text is required'), { status: 400 });
+      if (typeof to !== 'string' || !/^[a-z]{2,3}(-[A-Za-z]{2,4})?$/.test(to)) throw Object.assign(new Error('invalid target language'), { status: 400 });
+      const q = encodeURIComponent(text.slice(0, 1500));
+      const u = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${to}&dt=t&q=${q}`;
+      const buf = await fetchBuffer(u, 12000);
+      const data = JSON.parse(buf.toString('utf-8'));
+      const out = Array.isArray(data) && Array.isArray(data[0])
+        ? data[0].map(seg => (seg && seg[0]) || '').join('')
+        : text;
+      return sendJSON(res, 200, { text: out, from: (data && data[2]) || 'auto' });
     }
 
     return sendJSON(res, 404, { error: 'not found' });
