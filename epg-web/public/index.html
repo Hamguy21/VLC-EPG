@@ -194,6 +194,13 @@
     white-space:nowrap; text-overflow:ellipsis; }
   .webplayer video { flex:1; width:100%; min-height:0; background:#000; }
 
+  /* player segmented control */
+  .seg { display:inline-flex; border:1px solid var(--border); border-radius:8px; overflow:hidden; }
+  .seg-btn { background:var(--panel2); color:var(--muted); border:none; padding:6px 12px;
+    font-size:12px; cursor:pointer; }
+  .seg-btn + .seg-btn { border-left:1px solid var(--border); }
+  .seg-btn.active { background:var(--accent); color:#fff; }
+
   /* TV mode: bigger text/hit areas for viewing at a distance */
   body.tv .row { height:96px; contain-intrinsic-size:auto 96px; }
   body.tv .row .ch { width:300px; height:96px; }
@@ -354,6 +361,11 @@
       <div class="jump-results" id="chJumpResults"></div>
     </span>
     <span class="hint">click a channel or program to watch · ★ = favorite</span>
+    <span class="grp">Player:</span>
+    <span class="seg" id="playerSeg">
+      <button class="seg-btn" data-player="vlc">VLC</button>
+      <button class="seg-btn" data-player="web">Web</button>
+    </span>
   </div>
 
   <div class="stage" id="stage" tabindex="0" aria-label="Electronic program guide">
@@ -793,6 +805,7 @@ function openSettings() {
   $('netCache').value = state.netCache;
   $('relayMode').checked = state.relay;
   $('playerSel').value = state.player;
+  updatePlayerSeg();
   $('autoTranslate').checked = state.translate;
   fillLangSelect();
   $('overlay').classList.add('open');
@@ -821,10 +834,14 @@ $('relayMode').addEventListener('change', e => {
   toast('FFmpeg relay ' + (state.relay ? 'on' : 'off'));
 });
 $('playerSel').addEventListener('change', e => {
-  state.player = e.target.value === 'web' ? 'web' : 'vlc';
-  storageSet(LS_PLAYER, state.player);
-  refreshPlayerButtons();
+  setPlayer(e.target.value);
   toast('Default player: ' + (state.player === 'web' ? 'Web' : 'VLC'));
+});
+document.querySelectorAll('#playerSeg .seg-btn').forEach(b => {
+  b.addEventListener('click', () => {
+    setPlayer(b.dataset.player);
+    toast('Default player: ' + (state.player === 'web' ? 'Web' : 'VLC'));
+  });
 });
 $('autoTranslate').addEventListener('change', e => {
   state.translate = e.target.checked;
@@ -1165,6 +1182,20 @@ function refreshPlayerButtons() {
   if (dPlay) dPlay.textContent = '▶ Play (' + primary + ')';
   if (dWeb) { dWeb.textContent = '🌐 ' + other; dWeb.title = 'Open in ' + other; }
 }
+// Sync the toolbar segmented control to state.player.
+function updatePlayerSeg() {
+  document.querySelectorAll('#playerSeg .seg-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.player === state.player);
+  });
+}
+// Set the default player (from toolbar or Settings) and keep all UI in sync.
+function setPlayer(p) {
+  state.player = p === 'web' ? 'web' : 'vlc';
+  storageSet(LS_PLAYER, state.player);
+  updatePlayerSeg();
+  refreshPlayerButtons();
+  const sel = $('playerSel'); if (sel) sel.value = state.player;
+}
 function playChannel(ch) {
   if (!ch || !ch.url) { toast('No stream URL for this channel', true); return; }
   state.current = { url: ch.url, name: ch.name };
@@ -1212,7 +1243,7 @@ async function playWeb(ch) {
     } else if (vid.canPlayType('application/vnd.apple.mpegurl')) {
       vid.src = src; vid.play().catch(() => {});
     } else {
-      toast('This browser cannot play HLS', true);
+      toast('This browser/environment cannot play the relayed HLS — use VLC.', true);
       closeWeb();
       return;
     }
@@ -1520,6 +1551,7 @@ state.translate = storageGet(LS_TRANS, '0') === '1';
 state.fullscreen = storageGet(LS_FS, '0') === '1';
 state.relay = storageGet(LS_RELAY, '0') === '1';
 state.player = storageGet(LS_PLAYER, 'vlc') === 'web' ? 'web' : 'vlc';
+updatePlayerSeg();
 try { const nc = parseInt(storageGet(LS_NETCACHE, '3000'), 10); if (nc >= 300 && nc <= 10000) state.netCache = nc; } catch (_) {}
 refreshSavedDropdown('');
 </script>
