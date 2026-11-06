@@ -501,21 +501,42 @@ function makeLocalProxy(longUrl) {
     return 'http://127.0.0.1:' + PORT + '/plproxy/' + slug + '/master.m3u8';
   } catch (_) { return longUrl; }
 }
+// Intermittent upstream (silo) segment failures can kill a freshly-started
+// relay. Retry once with a fresh session before giving up.
+async function startMp4WithRetry(url, opts) {
+  try { return await startMp4Relay(url, opts); }
+  catch (e) {
+    if (e && e.status === 422 && !opts._retried) {
+      opts._retried = true;
+      sev('relay_startup_retry', {});
+      return startMp4Relay(url, opts);
+    }
+    throw e;
+  }
+}
 async function plFetchProxied(proxy, rel) {
-  sev('pl_fetch_try', { rel: String(rel).slice(0, 120) });
   let remote;
   if (/^https?:\/\//i.test(rel)) {
     // Absolute passthrough (signed segment/key URLs): use exactly as given,
     // never append our session query (it corrupts the signature).
     remote = rel;
   } else {
+    if (!rel) throw new Error('empty relative path');
     remote = 'https://' + proxy.host + '/api/tn/video/playout/v2/stitch/hls/channel/' + proxy.channel + '/' + rel;
     const u = new URL(remote);
     if (!u.search) u.search = '?' + proxy.query;   // attach auth for rel subresources
     remote = u.toString();
   }
-  const resp = await fetch(remote, { headers: { 'User-Agent': DEFAULT_UA, 'Referer': 'https://pluto.tv/', 'Origin': 'https://pluto.tv' } });
-  if (!resp.ok) { sev('pl_fetch_fail', { remote: remote.slice(0, 130), status: resp.status }); throw new Error('upstream HTTP ' + resp.status); }
+  const headers = { 'User-Agent': DEFAULT_UA, 'Referer': 'https://pluto.tv/', 'Origin': 'https://pluto.tv' };
+  let resp = null, last = null;
+  for (let a = 0; a < 3; a++) {
+    try { resp = await fetch(remote, { headers }); if (resp.ok) break; last = resp.status; } catch (e) { last = e; }
+    if (a < 2) await new Promise(r => setTimeout(r, 400));
+  }
+  if (!resp || !resp.ok) {
+    sev('pl_fetch_fail', { remote: remote.slice(0, 130), status: last instanceof Error ? 'ERR' : last });
+    throw new Error('upstream HTTP ' + (last instanceof Error ? last.message : last));
+  }
   return resp;
 }
 function rewritePlutoPlaylist(text, slug, base) {
@@ -1332,7 +1353,7 @@ const server = http.createServer(async (req, res) => {
         throw Object.assign(new Error('content-type must be application/json'), { status: 415 });
       const { url, buffer, tc } = parseJSON(await readBody(req));
       if (typeof url !== 'string' || !url.trim()) throw Object.assign(new Error('url is required'), { status: 400 });
-      const r = await startMp4Relay(url, { bufferMs: (Number(buffer) || 30) * 1000, tc: !!tc });
+      const r = await startMp4WithRetry(url, { bufferMs: (Number(buffer) || 30) * 1000, tc: !!tc });
       return sendJSON(res, 200, r);
     }
 
