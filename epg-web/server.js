@@ -486,6 +486,95 @@ async function plutoFreshUrl(masterUrl) {
   }
 }
 
+// --- Pluto HLS proxy (dodges ffmpeg's ~4KB URL truncation) ---
+// The relay talks only to short local /plproxy/<slug>/... URLs; the server
+// holds the long stitcher URL and fetches/rewrites playlists + segments.
+const plProxyMap = new Map(); // slug -> {host, channel, query}
+function makeLocalProxy(longUrl) {
+  try {
+    const u = new URL(longUrl);
+    const m = longUrl.match(/\/channel\/([^/]+)\/master\.m3u8/);
+    if (!m) return longUrl;
+    const slug = 'pp' + Date.now().toString(36) + Math.floor(Math.random() * 1e6).toString(36);
+    plProxyMap.set(slug, { host: u.host, channel: m[1], query: u.search.slice(1) });
+    sev('pl_proxy', { slug, len: longUrl.length });
+    return 'http://127.0.0.1:' + PORT + '/plproxy/' + slug + '/master.m3u8';
+  } catch (_) { return longUrl; }
+}
+async function plFetchProxied(proxy, rel) {
+  sev('pl_fetch_try', { rel: String(rel).slice(0, 120) });
+  let remote;
+  if (/^https?:\/\//i.test(rel)) {
+    // Absolute passthrough (signed segment/key URLs): use exactly as given,
+    // never append our session query (it corrupts the signature).
+    remote = rel;
+  } else {
+    remote = 'https://' + proxy.host + '/api/tn/video/playout/v2/stitch/hls/channel/' + proxy.channel + '/' + rel;
+    const u = new URL(remote);
+    if (!u.search) u.search = '?' + proxy.query;   // attach auth for rel subresources
+    remote = u.toString();
+  }
+  const resp = await fetch(remote, { headers: { 'User-Agent': DEFAULT_UA, 'Referer': 'https://pluto.tv/', 'Origin': 'https://pluto.tv' } });
+  if (!resp.ok) { sev('pl_fetch_fail', { remote: remote.slice(0, 130), status: resp.status }); throw new Error('upstream HTTP ' + resp.status); }
+  return resp;
+}
+function rewritePlutoPlaylist(text, slug, base) {
+  const esc = encodeURIComponent;
+  const prox = href => '/plproxy/' + slug + '/?u=' + esc(href);
+  return text.split('\n').map(raw => {
+    const line = raw.replace(/\r$/, '');
+    const t = line.trim();
+    if (t.startsWith('#')) {
+      if (/URI="[^"]+"/.test(line)) {
+        return line.replace(/URI="([^"]+)"/g, (m, uri) => {
+          try { return 'URI="' + prox(new URL(uri, base).href) + '"'; } catch (_) { return m; }
+        });
+      }
+      return line;
+    }
+    if (!t) return line;
+    try { return prox(new URL(t, base).href); } catch (_) { return line; }
+  }).join('\n');
+}
+async function routePlProxy(res, p) {
+  const rest = p.slice('/plproxy/'.length);
+  const i = rest.indexOf('/');
+  const slug = i < 0 ? rest : rest.slice(0, i);
+  const proxy = plProxyMap.get(slug);
+  if (!proxy) return null;
+  const mu = p.match(/[?&]u=([^&]*)/);
+  let rel = '';
+  if (mu) {
+    const dec = decodeURIComponent(mu[1]);
+    if (!/^https?:\/\//i.test(dec)) return null;
+    rel = dec; // exact signed URL (rewrite encoded it once; undo that once)
+  } else {
+    rel = i < 0 ? '' : rest.slice(i + 1);
+  }
+  if (/\.\.\//.test(rel)) return null;
+  // base URL (directory) for resolving relative playlists URIs against
+  let baseUrl;
+  if (/^https?:\/\//i.test(rel)) baseUrl = rel;
+  else baseUrl = 'https://' + proxy.host + '/api/tn/video/playout/v2/stitch/hls/channel/' + proxy.channel + '/' + rel;
+  baseUrl = baseUrl.slice(0, baseUrl.lastIndexOf('/') + 1);
+  try {
+    const r = await plFetchProxied(proxy, rel);
+    const buf = Buffer.from(await r.arrayBuffer());
+    const ctype = r.headers.get('content-type') || '';
+    if (ctype.includes('mpegurl') || /\.m3u8(\?|$)/i.test(rel)) {
+      res.writeHead(200, { 'Content-Type': 'application/vnd.apple.mpegurl', 'Cache-Control': 'no-store' });
+      res.end(rewritePlutoPlaylist(buf.toString('utf8'), slug, baseUrl));
+    } else {
+      res.writeHead(200, { 'Content-Type': ctype || 'application/octet-stream', 'Cache-Control': 'no-store' });
+      res.end(buf);
+    }
+  } catch (e) {
+    if (!res.headersSent) res.writeHead(502, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'proxy upstream: ' + e.message }));
+  }
+  return true;
+}
+
 function launchVlc(url, name, fullscreen, hw) {
   return new Promise((resolve, reject) => {
     if (vlcChild) { try { vlcChild.kill(); } catch (_) {} vlcChild = null; }
@@ -708,6 +797,7 @@ async function startMp4Relay(url, opts) {
       if (mp4Child === child) mp4Child = null;
       const ms = Date.now() - tStart;
       sev('relay_exit', { slug, code, ms });
+      if (code !== 0) sev('ffmpeg_exit_err', { slug, code, tail: errLines.join('\n').slice(-1200) });
       // Clean exit shortly after start = the upstream feed ended (EOF), not a
       // network blip. Flag it so the client can stop the reconnect loop.
       if (code === 0 && ms < 30000) { mp4Eof = true; sev('relay_eof', { slug, ms }); }
@@ -1218,6 +1308,12 @@ const server = http.createServer(async (req, res) => {
     // Server-side diagnostic log (for Debug mode export).
     if (p === '/debuglog' && req.method === 'GET') {
       return sendJSON(res, 200, { now: Date.now(), events: serverEvents });
+    }
+
+    // Pluto HLS proxy: short local URLs that relay the long stitcher feed.
+    if (p.startsWith('/plproxy/')) {
+      const handled = await routePlProxy(res, p);
+      if (handled) return;
     }
 
     // Current relay codec info (for Stats-for-nerds).
