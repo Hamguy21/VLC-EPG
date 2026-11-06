@@ -565,6 +565,7 @@ function stopPlay() {
 let mp4Child = null;
 let mp4File = null;
 let mp4Slug = null;
+let mp4BufferMs = 30000;
 function stopMp4Relay() {
   if (mp4Child) { try { mp4Child.kill(); } catch (_) {} mp4Child = null; }
   if (mp4File) { try { fs.rmSync(mp4File, { force: true }); } catch (_) {} mp4File = null; }
@@ -597,7 +598,7 @@ function startMp4Relay(url, opts) {
     let child;
     try { child = spawn(FFMPEG, args, { detached: false }); }
     catch (e) { return reject(new Error('failed to start FFmpeg: ' + e.message)); }
-    mp4Child = child; mp4File = file; mp4Slug = slug;
+    mp4Child = child; mp4File = file; mp4Slug = slug; mp4BufferMs = bufferMs;
     const errLines = [];
     child.stderr.on('data', d => { errLines.push(String(d)); if (errLines.length > 40) errLines.shift(); });
     let settled = false;
@@ -611,31 +612,50 @@ function startMp4Relay(url, opts) {
     const t0 = Date.now();
     const wait = setInterval(() => {
       const elapsed = Date.now() - tStart;
-      const ready = fs.existsSync(file) && fs.statSync(file).size >= 131072 && elapsed >= bufferMs;
-      if (ready) { clearInterval(wait); done(); }   // buffered window + init/fragments exist
-      else if (elapsed > 120000) { clearInterval(wait); fail('MP4 relay timed out: ' + errLines.join(' ').slice(-200)); }
-    }, 500);
+      const ready = fs.existsSync(file) && fs.statSync(file).size >= 262144; // init + some fragments -> fast start
+      if (ready) { clearInterval(wait); done(); }
+      else if (elapsed > 60000) { clearInterval(wait); fail('MP4 relay timed out: ' + errLines.join(' ').slice(-200)); }
+    }, 300);
   });
 }
-// Stream a growing file to res (progressive, chunked, no content-length).
-function streamGrowingFile(res, file) {
-  let start = 0;
+// Stream a growing file to res. Starts at the live edge (fast start), then
+// gradually lags behind by up to `bufferMs` so the client accumulates a
+// buffer while playing, covering short upstream blips.
+function streamGrowingFile(res, file, bufferMs) {
+  const rampMs = 15000;                       // time to reach full buffer
+  const target = Math.max(2000, bufferMs || 10000);
+  const startTs = Date.now();
+  const samples = [];                          // [{size, t}] received watermark log
+  let sentUpTo = 0;
   res.writeHead(200, { 'Content-Type': 'video/mp4', 'Transfer-Encoding': 'chunked', 'Cache-Control': 'no-store' });
+  const currentAge = () => {
+    const el = Date.now() - startTs;
+    return Math.min(target, el * (target / rampMs));
+  };
+  // largest received offset that is 'old enough' to release now
+  const releaseOffset = () => {
+    const cutoff = Date.now() - currentAge();
+    let off = 0;
+    for (const s of samples) { if (s.t <= cutoff) off = s.size; else break; }
+    return off;
+  };
   const pump = () => {
     if (res.writableEnded) return;
     try {
-      const st = fs.statSync(file);
-      if (st.size > start) {
+      const size = fs.statSync(file).size;
+      if (size > (samples.length ? samples[samples.length - 1].size : 0)) samples.push({ size, t: Date.now() });
+      const off = releaseOffset();
+      if (off > sentUpTo) {
         const fd = fs.openSync(file, 'r');
-        const buf = Buffer.alloc(st.size - start);
-        fs.readSync(fd, buf, 0, buf.length, start);
+        const buf = Buffer.alloc(off - sentUpTo);
+        fs.readSync(fd, buf, 0, buf.length, sentUpTo);
         fs.closeSync(fd);
-        start = st.size;
+        sentUpTo = off;
         res.write(buf);
       }
     } catch (_) {}
   };
-  const iv = setInterval(pump, 200);
+  const iv = setInterval(pump, 250);
   pump();
   res.on('close', () => clearInterval(iv));
 }
@@ -1121,7 +1141,7 @@ const server = http.createServer(async (req, res) => {
       const rel = p.slice('/relaymp4/'.length);
       const abs = path.join(RELAY_DIR, path.normalize(rel));
       if (!abs.startsWith(RELAY_DIR + path.sep) || !fs.existsSync(abs)) return sendJSON(res, 404, { error: 'not found' });
-      streamGrowingFile(res, abs);
+      streamGrowingFile(res, abs, mp4BufferMs);
       return;
     }
 
