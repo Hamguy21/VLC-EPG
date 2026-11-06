@@ -492,9 +492,10 @@ function startRelay(url) {
     fs.mkdirSync(dir, { recursive: true });
     const playlist = path.join(dir, 'index.m3u8');
     const args = [
-      '-hide_banner', '-loglevel', 'error',
+      '-hide_banner', '-loglevel', 'error', '-nostdin',
       '-user_agent', DEFAULT_UA,
       '-headers', 'X-Forwarded-For: 102.88.71.139\r\n',
+      '-rw_timeout', '15000000',   // 15s network I/O timeout
       '-i', url,
       '-c', 'copy',
       '-f', 'hls',
@@ -516,6 +517,7 @@ function startRelay(url) {
       if (settled) return; settled = true;
       if (wait) clearInterval(wait);
       stopRelay();
+      console.error('[relay] failed:', msg);
       const er = new Error(msg); er.status = 422; reject(er);
     };
     const done = () => {
@@ -523,11 +525,17 @@ function startRelay(url) {
       if (wait) clearInterval(wait);
       resolve({ playUrl: `http://127.0.0.1:${PORT}/relay/${slug}/index.m3u8`, relay: true, slug });
     };
-    child.on('error', e => fail('FFmpeg failed: ' + e.message));
+    const stderrSnippet = () => errLines.join('').replace(/\r/g, '').split('\n').filter(Boolean).slice(-6).join(' ').slice(0, 300);
+    child.on('error', e => fail('FFmpeg failed to start: ' + e.message));
     child.on('exit', code => {
       if (relayChild === child) { relayChild = null; relayDir = null; }
-      const lastErr = (errLines[errLines.length - 1] || '').slice(0, 200);
-      setTimeout(() => { if (!fs.existsSync(playlist)) fail('FFmpeg exited (code ' + code + ') ' + lastErr); }, 60);
+      console.error('[relay] exit code=' + code, 'stderr:', stderrSnippet());
+      setTimeout(() => {
+        if (!fs.existsSync(playlist)) {
+          const detail = stderrSnippet();
+          fail('FFmpeg ' + (code === null ? 'exited unexpectedly' : 'exited (code ' + code + ')') + (detail ? ': ' + detail : ' before producing a stream'));
+        }
+      }, 60);
     });
     const t0 = Date.now();
     wait = setInterval(() => {
