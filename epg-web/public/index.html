@@ -1352,6 +1352,7 @@ async function playWeb(ch) {
   vid.pause(); vid.removeAttribute('src'); vid.load();
   vid._reconnects = 0;
   vid._triedTc = false;
+  vid._eofRestarts = 0;
   let mp4Err = null;
   for (let attempt = 0; attempt < 2; attempt++) {
     try { await startMp4(ch); mp4Err = null; break; }
@@ -1414,23 +1415,19 @@ async function startMp4(ch, quiet, tc) {
 // Auto-recover from momentary network blips: if playback stalls (time stops
 // advancing) for ~12s, restart the relay and reload. Capped to avoid loops.
 async function checkFeedEnded(ch, vid) {
-  if (vid._checkedEnded) return;
+  if (vid._checkedEnded) return false;
   vid._checkedEnded = true;
   try {
     const j = await (await fetch('/relayinfo')).json();
-    if (j.ended) {
-      vid._stopStall = true;
-      dbgLog('feed_ended', {});
-      toast("This channel's stream ended right after starting (Pluto returned a short/closed feed). Try VLC or another channel.", true);
-    } else {
-      setTimeout(() => { vid._checkedEnded = false; }, 15000);
-    }
+    if (j.ended) { dbgLog('feed_ended', {}); return true; }
+    setTimeout(() => { vid._checkedEnded = false; }, 15000);
   } catch (_) {}
+  return false;
 }
 function monitorStall(ch, vid) {
   clearInterval(vid._stall);
   let last = vid.currentTime, lastAt = Date.now();
-  vid._stall = setInterval(() => {
+  vid._stall = setInterval(async () => {
     const now = Date.now();
     const playing = !vid.paused && vid.readyState >= 2;
     if (playing) {
@@ -1438,8 +1435,23 @@ function monitorStall(ch, vid) {
       else if (now - lastAt > 20000) {
         if (vid._reconnects >= 3) { toast('Stream stalled repeatedly — check your connection. Use VLC if it continues.', true); clearInterval(vid._stall); return; }
         // Is the feed actually over (clean EOF) rather than a blip?
-        checkFeedEnded(ch, vid);
-        if (vid._stopStall) { clearInterval(vid._stall); return; }
+        const ended = await checkFeedEnded(ch, vid);
+        if (ended) {
+          // Pluto-style feeds arrive in short, bounded segments. If we got real
+          // playback before EOF, auto-restart to keep viewing; otherwise give up.
+          if (vid._eofRestarts < 4 && last > 5) {
+            vid._eofRestarts++;
+            dbgLog('eof_restart', { n: vid._eofRestarts });
+            toast('Channel streams in short segments — auto-restarting (' + vid._eofRestarts + ')…');
+            lastAt = now;
+            post('/stop', {}).catch(() => {});
+            startMp4(ch, true).catch(() => {});
+          } else {
+            clearInterval(vid._stall);
+            toast("This channel's feed ends too early — try VLC or another channel.", true);
+          }
+          return;
+        }
         vid._reconnects++;
         lastAt = now;
         dbgLog('reconnect', { n: vid._reconnects, at: vid.currentTime });
