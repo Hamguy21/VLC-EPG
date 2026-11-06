@@ -193,6 +193,11 @@
   .webplayer .wp-title { flex:1; font-size:14px; font-weight:600; color:var(--text); overflow:hidden;
     white-space:nowrap; text-overflow:ellipsis; }
   .webplayer video { flex:1; width:100%; min-height:0; background:#000; }
+  .wp-loading { position:absolute; inset:44px 0 0; display:flex; align-items:center; justify-content:center;
+    background:rgba(0,0,0,.45); z-index:4; pointer-events:none; }
+  .wp-loading .spin { width:56px; height:56px; border:4px solid rgba(255,255,255,.18);
+    border-top-color:var(--accent); border-radius:50%; animation:transspin .8s linear infinite; }
+  .wp-loading .lbl { color:#cfd6e4; font-size:13px; margin-left:14px; }
   .stats-overlay { position:absolute; top:44px; left:12px; z-index:5; min-width:230px;
     background:rgba(0,0,0,.78); color:#cfd6e4; font:11px/1.5 ui-monospace,Consolas,monospace;
     padding:10px 12px; border-radius:8px; border:1px solid rgba(255,255,255,.15); pointer-events:none; }
@@ -499,6 +504,9 @@
     <button class="d-close" id="wpClose" title="Close">×</button>
   </div>
   <video id="wpVideo" controls autoplay playsinline></video>
+  <div class="wp-loading" id="wpLoading" style="display:flex">
+    <div class="spin"></div><div class="lbl">Buffering…</div>
+  </div>
   <div class="stats-overlay" id="statsOverlay" style="display:none"></div>
   <div class="ctx-menu" id="ctxMenu" style="display:none"></div>
 </div>
@@ -1266,6 +1274,7 @@ async function runSpeedTest() {
     const mb = buf.byteLength / (1024 * 1024);
     const mbps = mb / secs;
     const m = mbps * 8; // Mbps
+    window._lastMbps = m;
     let tier, rec;
     if (m >= 8) { tier = '30s'; rec = 'great for 1080p/4K'; }
     else if (m >= 5) { tier = '24s'; rec = 'fine for 1080p'; }
@@ -1302,6 +1311,7 @@ async function playWeb(ch) {
   const $p = $('webplayer'), vid = $('wpVideo');
   $('wpTitle').textContent = ch.name;
   $p.style.display = 'flex';
+  showLoader(true);
   if (hlsPlayer) { try { hlsPlayer.destroy(); } catch (_) {} hlsPlayer = null; }
   vid.pause(); vid.removeAttribute('src'); vid.load();
   vid._reconnects = 0;
@@ -1309,9 +1319,10 @@ async function playWeb(ch) {
     await startMp4(ch);
   } catch (e) {
     try { await startHlsPlay(ch); }
-    catch (e2) { toast('Web player failed: ' + e2.message, true); closeWeb(); }
+    catch (e2) { showLoader(false); toast('Web player failed: ' + e2.message, true); closeWeb(); }
   }
 }
+function showLoader(on) { const l = $('wpLoading'); if (l) l.style.display = on ? 'flex' : 'none'; }
 
 // Start the native MP4 relay and attach the video + auto-reconnect monitor.
 async function startMp4(ch, quiet) {
@@ -1327,6 +1338,7 @@ async function startMp4(ch, quiet) {
     }, 10000);
   }
   vid.onloadedmetadata = () => { metaDone = true; vid.play().catch(() => {}); };
+  vid.addEventListener('playing', () => showLoader(false), { once: true });
   vid.onerror = () => {
     if (vid.error && vid.error.code === 4) { vid.onerror = null; startHlsPlay(ch).catch(() => {}); }
   };
@@ -1382,7 +1394,7 @@ function closeWeb() {
   if (hlsPlayer) { try { hlsPlayer.destroy(); } catch (_) {} hlsPlayer = null; }
   clearInterval(statsTimer); statsTimer = null;
   const vid = $('wpVideo'); clearTimeout(vid._wpWatch); clearInterval(vid._stall); vid.pause(); vid.removeAttribute('src'); vid.load(); vid.onerror = null; vid.onloadedmetadata = null;
-  $('ctxMenu').style.display = 'none'; $('statsOverlay').style.display = 'none';
+  $('ctxMenu').style.display = 'none'; $('statsOverlay').style.display = 'none'; showLoader(false);
   $('webplayer').style.display = 'none';
   post('/stop', {}).catch(() => {});
 }
@@ -1416,6 +1428,7 @@ function showCtx(x, y, hasStats) {
   });
 }
 let statsTimer = null;
+let frameCount = 0;
 function toggleStats() {
   const ov = $('statsOverlay');
   const on = ov.style.display !== 'block';
@@ -1432,20 +1445,46 @@ function updateStats() {
   const v = $('wpVideo');
   const ov = $('statsOverlay');
   if (!v || ov.style.display !== 'block') { clearInterval(statsTimer); return; }
-  let buffered = '—';
-  if (v.buffered && v.buffered.length) {
-    const end = v.buffered.end(v.buffered.length - 1);
-    buffered = end.toFixed(1) + 's (ahead ' + Math.max(0, end - v.currentTime).toFixed(1) + 's)';
-  }
-  let q = '—';
-  try { const pq = v.getVideoPlaybackQuality && v.getVideoPlaybackQuality(); if (pq) q = 'dropped ' + pq.droppedFrames + ' · corrupted ' + pq.corruptedFrames; } catch (_) {}
+  const now = Date.now();
+  if (window._lastBufEnd === undefined) window._lastBufEnd = 0;
+  let ahead = 0, bufEnd = 0;
+  if (v.buffered && v.buffered.length) { bufEnd = v.buffered.end(v.buffered.length - 1); ahead = Math.max(0, bufEnd - v.currentTime); }
+  const activity = bufEnd > window._lastBufEnd + 0.01 ? '↑ receiving'
+    : (ahead > 4 ? 'buffer full (throttled)' : 'idle/stalled');
+  window._lastBufEnd = bufEnd;
+
+  const health = ahead >= 20 ? 'Good'
+    : ahead >= 10 ? 'Medium'
+    : ahead >= 3 ? 'Low' : 'Critical';
+  const healthPct = Math.min(100, Math.round(ahead / 30 * 100));
+
+  let frameInfo = '—';
+  try {
+    if (v.requestVideoFrameCallback) {
+      v.requestVideoFrameCallback(() => { frameCount++; });
+      frameInfo = String(frameCount);
+    }
+  } catch (_) {}
+  const cs = (v.colorSpace && v.colorSpace.primaries) ? v.colorSpace.primaries : '—';
+  const res = (v.videoWidth || '?') + '×' + (v.videoHeight || '?');
+  const optRes = window._lastMbps ? (window._lastMbps >= 8 ? '1920×1080' : window._lastMbps >= 3.2 ? '1280×720' : '854×480') : 'auto';
+  const speed = window._lastMbps ? window._lastMbps.toFixed(1) + ' Mbps (measured)' : '— (run speed test)';
+  const mystery = ['“Did you know the moon has moonquakes?”', '“Try the VLC player for HW accel.”', '“Latency & packet loss > raw speed.”', '“A perfect buffer is a 15MB secret.”'][Math.floor(now / 8000) % 4];
+  let dropped = '?';
+  try { dropped = v.getVideoPlaybackQuality ? v.getVideoPlaybackQuality().droppedFrames : '?'; } catch (_) {}
+
   ov.innerHTML =
     `<b>Stats for nerds</b><br>` +
-    `Resolution: ${v.videoWidth||'?'}×${v.videoHeight||'?'}<br>` +
-    `Position: ${v.currentTime.toFixed(1)}s / readyState ${v.readyState}<br>` +
-    `Buffered: ${buffered}<br>` +
-    `Playback speed: ${(v.playbackRate||1).toFixed(2)}×<br>` +
-    `Quality: ${state.quality} · ${q}`;
+    `Viewport / Frames: ${window.innerWidth}×${window.innerHeight} / ${frameInfo} (dropped ${dropped})<br>` +
+    `Current / Optimal Res: ${res} / ${optRes}<br>` +
+    `Volume / Normalized: ${Math.round((v.volume||0)*100)}% / ${v.muted ? 'muted' : 'on'}<br>` +
+    `Codecs: H.264/AAC (MP4 relay)<br>` +
+    `Color: ${cs}<br>` +
+    `Connection Speed: ${speed}<br>` +
+    `Network Activity: ${activity}<br>` +
+    `Buffer Health: ${health} (${healthPct}% · ${ahead.toFixed(1)}s ahead)<br>` +
+    `Mystery Text: ${mystery}<br>` +
+    `Date: ${new Date().toLocaleString()}`;
 }
 document.getElementById('wpVideo').addEventListener('contextmenu', e => {
   e.preventDefault();
