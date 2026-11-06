@@ -1409,12 +1409,15 @@ async function startMp4(ch, quiet, tc) {
   vid.addEventListener('playing', () => {
     showLoader(false);
     dbgLog('playing', { t: vid.currentTime });
-    // On a reconnect (quiet restart), the new relay starts at 0 — seek to the
-    // live edge so we don't replay the segment tail we already watched.
+    // On a reconnect (quiet restart), the new relay starts at the current live
+    // point. Skip modestly forward (capped by what's buffered) to get past the
+    // immediate ad/program front — do NOT rewind (buffered.end is near the
+    // start shortly after opening, so seeking to it would replay content).
     if (quiet && vid.buffered && vid.buffered.length) {
       try {
-        const live = Math.max(0, vid.buffered.end(vid.buffered.length - 1) - 2);
-        if (live > 1) { vid.currentTime = live; dbgLog('live_seek', { to: live }); }
+        const be = vid.buffered.end(vid.buffered.length - 1);
+        const skip = Math.min(be - 1, 15);
+        if (skip > 3) { vid.currentTime = skip; dbgLog('reconnect_skip', { to: skip }); }
       } catch (_) {}
     }
   }, { once: true });
