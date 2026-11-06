@@ -1376,7 +1376,10 @@ async function playWeb(ch) {
     catch (e2) { showLoader(false); dbgLog('web_failed', { msg: e2.message }); toast('Web player failed: ' + e2.message, true); closeWeb(); }
   }
 }
-function showLoader(on) { const l = $('wpLoading'); if (l) l.style.display = on ? 'flex' : 'none'; }
+function showLoader(on) {
+  const l = $('wpLoading'); if (l) l.style.display = on ? 'flex' : 'none';
+  const v = $('wpVideo'); if (v) v.controls = !on;  // hide native spinner so only ours shows
+}
 
 // ---- Debug mode: record player/server events for diagnosis ----
 const dbg = { events: [] };
