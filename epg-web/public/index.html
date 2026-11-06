@@ -1235,33 +1235,57 @@ async function playWeb(ch) {
   $p.style.display = 'flex';
   if (hlsPlayer) { try { hlsPlayer.destroy(); } catch (_) {} hlsPlayer = null; }
   vid.pause(); vid.removeAttribute('src'); vid.load();
+  vid._reconnects = 0;
   try {
-    // Try native MP4 relay first.
-    const r4 = await post('/streammp4', { url: ch.url });
-    vid.preload = 'auto';
-    vid.src = r4.url;
-    let metaDone = false;
-    clearTimeout(vid._wpWatch);
-    vid._wpWatch = setTimeout(() => {
-      if (!metaDone && vid.readyState < 1) {
-        toast('Web player is still buffering — try the VLC player if this persists.', true);
-      }
-    }, 10000);
-    vid.onloadedmetadata = () => { metaDone = true; vid.play().catch(() => {}); };
-    vid.onerror = () => {
-      // Fall back to HLS relay if the native MP4 path isn't supported.
-      if (vid.error && vid.error.code === 4) {
-        vid.onerror = null;
-        startHlsPlay(ch);
-      }
-    };
-    vid.play().catch(() => {});
-    state.current = { url: ch.url, name: ch.name };
+    await startMp4(ch);
   } catch (e) {
-    // MP4 relay failed -> try HLS relay.
     try { await startHlsPlay(ch); }
     catch (e2) { toast('Web player failed: ' + e2.message, true); closeWeb(); }
   }
+}
+
+// Start the native MP4 relay and attach the video + auto-reconnect monitor.
+async function startMp4(ch, quiet) {
+  const vid = $('wpVideo');
+  const r4 = await post('/streammp4', { url: ch.url });
+  vid.preload = 'auto';
+  vid.src = r4.url;
+  let metaDone = false;
+  clearTimeout(vid._wpWatch);
+  if (!quiet) {
+    vid._wpWatch = setTimeout(() => {
+      if (!metaDone && vid.readyState < 1) toast('Web player is still buffering — try the VLC player if this persists.', true);
+    }, 10000);
+  }
+  vid.onloadedmetadata = () => { metaDone = true; vid.play().catch(() => {}); };
+  vid.onerror = () => {
+    if (vid.error && vid.error.code === 4) { vid.onerror = null; startHlsPlay(ch).catch(() => {}); }
+  };
+  vid.play().catch(() => {});
+  state.current = { url: ch.url, name: ch.name };
+  monitorStall(ch, vid);
+}
+
+// Auto-recover from momentary network blips: if playback stalls (time stops
+// advancing) for ~12s, restart the relay and reload. Capped to avoid loops.
+function monitorStall(ch, vid) {
+  clearInterval(vid._stall);
+  let last = vid.currentTime, lastAt = Date.now();
+  vid._stall = setInterval(() => {
+    const now = Date.now();
+    const playing = !vid.paused && vid.readyState >= 2;
+    if (playing) {
+      if (vid.currentTime !== last) { last = vid.currentTime; lastAt = now; }
+      else if (now - lastAt > 12000) {
+        if (vid._reconnects >= 3) { toast('Stream stalled repeatedly — check your connection. Use VLC if it continues.', true); clearInterval(vid._stall); return; }
+        vid._reconnects++;
+        lastAt = now;
+        toast('Network blip — reconnecting…');
+        post('/stop', {}).catch(() => {});
+        startMp4(ch, true).catch(() => {});
+      }
+    }
+  }, 2000);
 }
 async function startHlsPlay(ch) {
   const vid = $('wpVideo');
@@ -1287,7 +1311,7 @@ async function startHlsPlay(ch) {
 }
 function closeWeb() {
   if (hlsPlayer) { try { hlsPlayer.destroy(); } catch (_) {} hlsPlayer = null; }
-  const vid = $('wpVideo'); clearTimeout(vid._wpWatch); vid.pause(); vid.removeAttribute('src'); vid.load(); vid.onerror = null; vid.onloadedmetadata = null;
+  const vid = $('wpVideo'); clearTimeout(vid._wpWatch); clearInterval(vid._stall); vid.pause(); vid.removeAttribute('src'); vid.load(); vid.onerror = null; vid.onloadedmetadata = null;
   $('webplayer').style.display = 'none';
   post('/stop', {}).catch(() => {});
 }
