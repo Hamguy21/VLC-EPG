@@ -185,6 +185,15 @@
     font-size:13px; z-index:100; opacity:0; transition:opacity .2s; pointer-events:none; }
   .toast.show { opacity:1; }
 
+  /* web player overlay */
+  .webplayer { position:fixed; inset:0; z-index:120; background:#000;
+    display:flex; flex-direction:column; }
+  .webplayer .wp-head { display:flex; align-items:center; gap:12px; padding:8px 14px;
+    background:#11151d; border-bottom:1px solid var(--border); }
+  .webplayer .wp-title { flex:1; font-size:14px; font-weight:600; color:var(--text); overflow:hidden;
+    white-space:nowrap; text-overflow:ellipsis; }
+  .webplayer video { flex:1; width:100%; min-height:0; background:#000; }
+
   /* TV mode: bigger text/hit areas for viewing at a distance */
   body.tv .row { height:96px; contain-intrinsic-size:auto 96px; }
   body.tv .row .ch { width:300px; height:96px; }
@@ -371,7 +380,8 @@
     </div>
   </div>
   <div class="d-row">
-    <button class="btn" id="dPlay">▶ Play</button>
+    <button class="btn" id="dPlay">▶ Play (VLC)</button>
+    <button class="btn ghost" id="dWeb">🌐 Web player</button>
   </div>
 </div>
 
@@ -380,6 +390,13 @@
   <div class="panel" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
     <h2 id="settingsTitle">Settings</h2>
     <div class="p-sub">Display preferences</div>
+    <div class="p-row">
+      <span class="p-lbl">Player</span>
+      <select id="playerSel" class="pref-lang">
+        <option value="vlc">VLC</option>
+        <option value="web">Web player</option>
+      </select>
+    </div>
     <div class="p-row">
       <span class="p-lbl">Date format</span>
       <div class="fmt-opts" id="fmtOpts">
@@ -426,10 +443,20 @@
 
 <div class="toast" id="toast"></div>
 
+<!-- Web player overlay -->
+<div class="webplayer" id="webplayer" style="display:none">
+  <div class="wp-head">
+    <span class="wp-title" id="wpTitle"></span>
+    <button class="d-close" id="wpClose" title="Close">×</button>
+  </div>
+  <video id="wpVideo" controls autoplay playsinline></video>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js"></script>
 <script>
 const $ = id => document.getElementById(id);
 const stage = $('stage');
-const state = { channels: [], groups: [], now: Date.now(), fav: new Set(), current: null, dfmt: 'DMY', sel: null, view: [], lang: 'en', translate: false, fullscreen: false, netCache: 3000, relay: false };
+const state = { channels: [], groups: [], now: Date.now(), fav: new Set(), current: null, dfmt: 'DMY', sel: null, view: [], lang: 'en', translate: false, fullscreen: false, netCache: 3000, relay: false, player: 'vlc' };
 let timer = null, toastTimer = null, activeLoadId = 0;
 const LS_SOURCES = 'vlcEpgSources';
 const LS_FAV = 'vlcEpgFavorites';
@@ -440,6 +467,7 @@ const LS_TRANS = 'vlcEpgTranslate';
 const LS_FS = 'vlcEpgFullscreen';
 const LS_NETCACHE = 'vlcEpgNetCache';
 const LS_RELAY = 'vlcEpgRelay';
+const LS_PLAYER = 'vlcEpgPlayer';
 
 function storageGet(key, fallback) {
   try { const value = localStorage.getItem(key); return value == null ? fallback : value; }
@@ -764,6 +792,7 @@ function openSettings() {
   $('fsMode').checked = state.fullscreen;
   $('netCache').value = state.netCache;
   $('relayMode').checked = state.relay;
+  $('playerSel').value = state.player;
   $('autoTranslate').checked = state.translate;
   fillLangSelect();
   $('overlay').classList.add('open');
@@ -790,6 +819,12 @@ $('relayMode').addEventListener('change', e => {
   state.relay = e.target.checked;
   storageSet(LS_RELAY, state.relay ? '1' : '0');
   toast('FFmpeg relay ' + (state.relay ? 'on' : 'off'));
+});
+$('playerSel').addEventListener('change', e => {
+  state.player = e.target.value === 'web' ? 'web' : 'vlc';
+  storageSet(LS_PLAYER, state.player);
+  refreshPlayerButtons();
+  toast('Default player: ' + (state.player === 'web' ? 'Web' : 'VLC'));
 });
 $('autoTranslate').addEventListener('change', e => {
   state.translate = e.target.checked;
@@ -1083,11 +1118,11 @@ function render() {
         icon: el.dataset.icon || '', start: parseInt(el.dataset.start,10), stop: parseInt(el.dataset.stop,10)
       });
     });
-    // double-click plays the program's channel immediately
+    // double-click plays the program's channel (default player)
     el.addEventListener('dblclick', (e) => {
       e.stopPropagation();
       const ch = channels[parseInt(el.dataset.idx, 10)];
-      if (ch) playChannel(ch);
+      if (ch) playFor(ch);
     });
   });
 
@@ -1116,6 +1151,20 @@ function render() {
 }
 
 /* ---------- play + details ---------- */
+let hlsPlayer = null;
+// Play through the player selected in Settings (VLC or Web).
+function playFor(ch) {
+  if (state.player === 'web') playWeb(ch);
+  else playChannel(ch);
+}
+// Keep the drawer's two buttons labelled by the current choice.
+function refreshPlayerButtons() {
+  const primary = state.player === 'web' ? 'Web' : 'VLC';
+  const other = state.player === 'web' ? 'VLC' : 'Web';
+  const dPlay = $('dPlay'), dWeb = $('dWeb');
+  if (dPlay) dPlay.textContent = '▶ Play (' + primary + ')';
+  if (dWeb) { dWeb.textContent = '🌐 ' + other; dWeb.title = 'Open in ' + other; }
+}
 function playChannel(ch) {
   if (!ch || !ch.url) { toast('No stream URL for this channel', true); return; }
   state.current = { url: ch.url, name: ch.name };
@@ -1131,6 +1180,55 @@ function playChannel(ch) {
       toast('Play failed: ' + e.message, true);
     });
 }
+
+// Web player: plays the FFmpeg-relayed HLS in a <video> with hls.js,
+// including automatic error recovery (useful for streams that stall/drop).
+async function playWeb(ch) {
+  if (!ch || !ch.url) { toast('No stream URL for this channel', true); return; }
+  const $p = $('webplayer'), vid = $('wpVideo');
+  $('wpTitle').textContent = ch.name;
+  $p.style.display = 'flex';
+  if (hlsPlayer) { try { hlsPlayer.destroy(); } catch (_) {} hlsPlayer = null; }
+  vid.pause(); vid.removeAttribute('src'); vid.load();
+  try {
+    const r = await post('/stream', { url: ch.url });
+    const src = r.playUrl;
+    if (window.Hls && Hls.isSupported()) {
+      hlsPlayer = new Hls({ maxBufferLength: 30, enableWorker: true });
+      hlsPlayer.loadSource(src);
+      hlsPlayer.attachMedia(vid);
+      hlsPlayer.on(Hls.Events.MANIFEST_PARSED, () => vid.play().catch(() => {}));
+      hlsPlayer.on(Hls.Events.ERROR, (e, data) => {
+        if (!data.fatal) return;
+        if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+          console.warn('hls network error -> reload', data.details);
+          hlsPlayer.startLoad();
+        } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+          hlsPlayer.recoverMediaError();
+        } else {
+          toast('Stream error: ' + data.details, true);
+        }
+      });
+    } else if (vid.canPlayType('application/vnd.apple.mpegurl')) {
+      vid.src = src; vid.play().catch(() => {});
+    } else {
+      toast('This browser cannot play HLS', true);
+      closeWeb();
+      return;
+    }
+    state.current = { url: ch.url, name: ch.name };
+  } catch (e) {
+    toast('Web player failed: ' + e.message, true);
+    closeWeb();
+  }
+}
+function closeWeb() {
+  if (hlsPlayer) { try { hlsPlayer.destroy(); } catch (_) {} hlsPlayer = null; }
+  const vid = $('wpVideo'); vid.pause(); vid.removeAttribute('src'); vid.load();
+  $('webplayer').style.display = 'none';
+  post('/stop', {}).catch(() => {});
+}
+$('wpClose').addEventListener('click', closeWeb);
 
 function updateNowBar(ch) {
   const bar = $('nowbar');
@@ -1220,7 +1318,9 @@ function showDetails(ch, p) {
   $('dList').innerHTML = '';
   setDrawerIcon((p.icon && p.icon.trim()) || (ch.logo && ch.logo.trim()));
   renderMeta(p, ch);
-  $('dPlay').onclick = () => { playChannel(ch); };
+  $('dPlay').onclick = () => { playFor(ch); };
+  $('dWeb').onclick = () => { if (state.player === 'web') playChannel(ch); else playWeb(ch); };
+  refreshPlayerButtons();
   openDetails();
   if (state.translate && !progHasPreferredLang(p)) localizeDrawer(title, desc);
 }
@@ -1255,7 +1355,9 @@ function showChannelDetails(ch) {
   } else {
     $('dList').innerHTML = '';
   }
-  $('dPlay').onclick = () => { playChannel(ch); };
+  $('dPlay').onclick = () => { playFor(ch); };
+  $('dWeb').onclick = () => { if (state.player === 'web') playChannel(ch); else playWeb(ch); };
+  refreshPlayerButtons();
   openDetails();
   if (state.translate && np && !progHasPreferredLang(np)) localizeDrawer(nowTitle, nowDesc);
 }
@@ -1337,10 +1439,10 @@ switch (e.key) {
   case 'ArrowRight': e.preventDefault(); stage.scrollLeft += 140; break;
   case 'ArrowLeft':  e.preventDefault(); stage.scrollLeft -= 140; break;
   case 'Enter': {
-    const ch = selChannel(); if (ch) { e.preventDefault(); playChannel(ch); } break;
+    const ch = selChannel(); if (ch) { e.preventDefault(); playFor(ch); } break;
   }
   case ' ': {
-    const ch = selChannel(); if (ch) { e.preventDefault(); playChannel(ch); } break;
+    const ch = selChannel(); if (ch) { e.preventDefault(); playFor(ch); } break;
   }
 }
 });
@@ -1417,6 +1519,7 @@ try { const l = storageGet(LS_LANG, 'en'); if (/^[a-z]{2,3}$/.test(l)) state.lan
 state.translate = storageGet(LS_TRANS, '0') === '1';
 state.fullscreen = storageGet(LS_FS, '0') === '1';
 state.relay = storageGet(LS_RELAY, '0') === '1';
+state.player = storageGet(LS_PLAYER, 'vlc') === 'web' ? 'web' : 'vlc';
 try { const nc = parseInt(storageGet(LS_NETCACHE, '3000'), 10); if (nc >= 300 && nc <= 10000) state.netCache = nc; } catch (_) {}
 refreshSavedDropdown('');
 </script>

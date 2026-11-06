@@ -481,7 +481,9 @@ function stopRelay() {
   if (relayChild) { try { relayChild.kill(); } catch (_) {} relayChild = null; }
   if (relayDir) { try { fs.rmSync(relayDir, { recursive: true, force: true }); } catch (_) {} relayDir = null; }
 }
-function playRelay(url, opts) {
+// Start an FFmpeg relay and wait until its HLS playlist exists. Returns the
+// local play URL. Caller decides what plays it (VLC or a web player).
+function startRelay(url) {
   return new Promise((resolve, reject) => {
     if (!FFMPEG) return reject(new Error('FFmpeg is not available on this system'));
     stopRelay();
@@ -511,10 +513,7 @@ function playRelay(url, opts) {
     const wait = setInterval(() => {
       if (fs.existsSync(playlist)) {
         clearInterval(wait);
-        const playUrl = `http://127.0.0.1:${PORT}/relay/${slug}/index.m3u8`;
-        launchVlc(playUrl, opts && opts.name, opts && opts.fullscreen)
-          .then(() => resolve({ launched: true, url, relay: true, playUrl }))
-          .catch(reject);
+        resolve({ playUrl: `http://127.0.0.1:${PORT}/relay/${slug}/index.m3u8`, relay: true, slug });
       } else if (Date.now() - t0 > 20000) {
         clearInterval(wait);
         stopRelay();
@@ -522,6 +521,11 @@ function playRelay(url, opts) {
       }
     }, 400);
   });
+}
+function playRelay(url, opts) {
+  return startRelay(url).then(({ playUrl }) =>
+    launchVlc(playUrl, opts && opts.name, opts && opts.fullscreen)
+      .then(() => ({ launched: true, url, relay: true, playUrl })));
 }
 function stopPlay() {
   if (vlcChild) { try { vlcChild.kill(); } catch (_) {} vlcChild = null; }
@@ -906,6 +910,17 @@ const server = http.createServer(async (req, res) => {
       let r;
       if (relay) r = await playRelay(url, { name, fullscreen: !!fullscreen });
       else r = await playStream(url, name, { fullscreen: !!fullscreen, networkCaching, userAgent });
+      return sendJSON(res, 200, r);
+    }
+
+    // Start an FFmpeg relay and return the local play URL for a web player
+    // (does NOT launch VLC).
+    if (p === '/stream' && req.method === 'POST') {
+      if (req.headers['content-type']?.split(';')[0].trim() !== 'application/json')
+        throw Object.assign(new Error('content-type must be application/json'), { status: 415 });
+      const { url } = parseJSON(await readBody(req));
+      if (typeof url !== 'string' || !url.trim()) throw Object.assign(new Error('url is required'), { status: 400 });
+      const r = await startRelay(url);
       return sendJSON(res, 200, r);
     }
 
