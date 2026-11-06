@@ -658,6 +658,7 @@ async function startRelay(url) {
       '-user_agent', DEFAULT_UA,
       '-headers', relayHeaders(url),
       '-rw_timeout', '15000000',   // 15s network I/O timeout
+      '-err_detect', 'ignore_err',
       '-i', url,
       '-c', 'copy',
       '-f', 'hls',
@@ -816,6 +817,7 @@ async function startMp4Relay(url, opts) {
       '-user_agent', DEFAULT_UA,
       '-headers', relayHeaders(url),
       '-rw_timeout', '15000000',
+      '-err_detect', 'ignore_err',
       '-i', url,
     ];
     if (tc) {
@@ -824,7 +826,7 @@ async function startMp4Relay(url, opts) {
     } else {
       args.push('-c', 'copy', '-bsf:a', 'aac_adtstoasc'); // remux HLS AAC -> MP4
     }
-    args.push('-fflags', '+genpts+flush_packets', '-f', 'mp4',
+    args.push('-fflags', '+genpts+flush_packets+discardcorrupt', '-f', 'mp4',
       '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
       '-frag_duration', '500000', file);
     let child;
