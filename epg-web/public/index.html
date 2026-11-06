@@ -1328,6 +1328,7 @@ function showLoader(on) { const l = $('wpLoading'); if (l) l.style.display = on 
 async function startMp4(ch, quiet) {
   const vid = $('wpVideo');
   const r4 = await post('/streammp4', { url: ch.url, buffer: state.webBuffer });
+  if (r4.codecs) window._codecs = r4.codecs;
   vid.preload = 'auto';
   vid.src = r4.url;
   let metaDone = false;
@@ -1445,45 +1446,43 @@ function updateStats() {
   const v = $('wpVideo');
   const ov = $('statsOverlay');
   if (!v || ov.style.display !== 'block') { clearInterval(statsTimer); return; }
-  const now = Date.now();
   if (window._lastBufEnd === undefined) window._lastBufEnd = 0;
   let ahead = 0, bufEnd = 0;
   if (v.buffered && v.buffered.length) { bufEnd = v.buffered.end(v.buffered.length - 1); ahead = Math.max(0, bufEnd - v.currentTime); }
-  const activity = bufEnd > window._lastBufEnd + 0.01 ? '↑ receiving'
-    : (ahead > 4 ? 'buffer full (throttled)' : 'idle/stalled');
+  window._bufHist = window._bufHist || [];
+  window._bufHist.push(ahead);
+  if (window._bufHist.length > 40) window._bufHist.shift();
+  const maxA = Math.max(30, ...window._bufHist);
+  const n = window._bufHist.length;
+  const pts = window._bufHist.map((a, i) => `${n > 1 ? i / (n - 1) * 120 : 0},${26 - (a / maxA) * 22}`).join(' ');
+  const graph = `<svg width="120" height="28" viewBox="0 0 120 28" style="display:block;background:rgba(255,255,255,.04)"><polyline points="${pts}" fill="none" stroke="#4c8bf5" stroke-width="1.5"/><line x1="0" y1="24" x2="120" y2="24" stroke="rgba(255,255,255,.15)"/></svg>`;
+  const activity = bufEnd > window._lastBufEnd + 0.01 ? 'receiving'
+    : (ahead > 4 ? 'buffer full' : 'stalled');
   window._lastBufEnd = bufEnd;
 
-  const health = ahead >= 20 ? 'Good'
-    : ahead >= 10 ? 'Medium'
-    : ahead >= 3 ? 'Low' : 'Critical';
+  const health = ahead >= 20 ? 'Good' : ahead >= 10 ? 'Medium' : ahead >= 3 ? 'Low' : 'Critical';
   const healthPct = Math.min(100, Math.round(ahead / 30 * 100));
 
-  let frameInfo = '—';
-  try {
-    if (v.requestVideoFrameCallback) {
-      v.requestVideoFrameCallback(() => { frameCount++; });
-      frameInfo = String(frameCount);
-    }
-  } catch (_) {}
-  const cs = (v.colorSpace && v.colorSpace.primaries) ? v.colorSpace.primaries : '—';
-  const res = (v.videoWidth || '?') + '×' + (v.videoHeight || '?');
-  const optRes = window._lastMbps ? (window._lastMbps >= 8 ? '1920×1080' : window._lastMbps >= 3.2 ? '1280×720' : '854×480') : 'auto';
-  const speed = window._lastMbps ? window._lastMbps.toFixed(1) + ' Mbps (measured)' : '— (run speed test)';
-  const mystery = ['“Did you know the moon has moonquakes?”', '“Try the VLC player for HW accel.”', '“Latency & packet loss > raw speed.”', '“A perfect buffer is a 15MB secret.”'][Math.floor(now / 8000) % 4];
   let dropped = '?';
   try { dropped = v.getVideoPlaybackQuality ? v.getVideoPlaybackQuality().droppedFrames : '?'; } catch (_) {}
+  if (v.requestVideoFrameCallback) { try { v.requestVideoFrameCallback(() => { frameCount++; }); } catch (_) {} }
+  const res = (v.videoWidth || '?') + '×' + (v.videoHeight || '?');
+  const cc = window._codecs || {};
+  const cRes = cc.res || (window._lastMbps ? (window._lastMbps >= 8 ? '1920×1080' : window._lastMbps >= 3.2 ? '1280×720' : '854×480') : 'auto');
+  const codecLine = (cc.video || '—') + ' / ' + (cc.audio || '—') + (cc.res ? ' @ ' + cc.res : '');
+  const speed = window._lastMbps ? window._lastMbps.toFixed(1) + ' Mbps (measured)' : '— (run speed test)';
+  const cs = (v.colorSpace && v.colorSpace.primaries) ? v.colorSpace.primaries : '—';
 
   ov.innerHTML =
     `<b>Stats for nerds</b><br>` +
-    `Viewport / Frames: ${window.innerWidth}×${window.innerHeight} / ${frameInfo} (dropped ${dropped})<br>` +
-    `Current / Optimal Res: ${res} / ${optRes}<br>` +
+    `Viewport / Frames: ${window.innerWidth}×${window.innerHeight} / ${frameCount} (dropped ${dropped})<br>` +
+    `Current / Optimal Res: ${res} / ${cRes}<br>` +
     `Volume / Normalized: ${Math.round((v.volume||0)*100)}% / ${v.muted ? 'muted' : 'on'}<br>` +
-    `Codecs: H.264/AAC (MP4 relay)<br>` +
+    `Codecs: ${codecLine}<br>` +
     `Color: ${cs}<br>` +
     `Connection Speed: ${speed}<br>` +
-    `Network Activity: ${activity}<br>` +
+    `Network Activity: ${activity}` + graph + `<br>` +
     `Buffer Health: ${health} (${healthPct}% · ${ahead.toFixed(1)}s ahead)<br>` +
-    `Mystery Text: ${mystery}<br>` +
     `Date: ${new Date().toLocaleString()}`;
 }
 document.getElementById('wpVideo').addEventListener('contextmenu', e => {
