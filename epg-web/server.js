@@ -659,11 +659,19 @@ async function grabEPG(m3u, requestedCountries) {
   // grab. Each code resolves independently (success or failure).
   const CONCURRENCY = 6;
   let cursor = 0;
+  let covered = 0, missing = 0;
   async function worker() {
     while (cursor < codes.length) {
       const code = codes[cursor++];
-      try { absorb(await fetchGuide(code)); }
-      catch (e) { failures.push(code + ':' + e.message.slice(0, 60)); }
+      try {
+        absorb(await fetchGuide(code));
+        covered++;
+      } catch (e) {
+        // A 404 just means no guide exists for that country (expected) —
+        // don't report it as an error. Only real failures are surfaced.
+        if (/404/i.test(e.message)) missing++;
+        else failures.push(code + ':' + e.message.slice(0, 60));
+      }
     }
   }
   const workers = Array.from({ length: Math.min(CONCURRENCY, codes.length) }, worker);
@@ -681,7 +689,7 @@ async function grabEPG(m3u, requestedCountries) {
 
   return {
     total: playlist.channels.length,
-    matched, codes, failures,
+    matched, codes, failures, covered, missing,
     stats, groups: playlist.groupList,
     channels: playlist.channels,
     savedFile,

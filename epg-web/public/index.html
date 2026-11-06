@@ -688,8 +688,8 @@ async function autoGrab() {
     $('xmltv').value = $('xmltv').value || '';
     render();
     const msg = j.matched + ' of ' + j.total + ' channels matched (' +
-      j.stats.id + ' by id, ' + j.stats.name + ' by name) from ' +
-      j.codes.length + ' guide(s)';
+      j.stats.id + ' by id, ' + j.stats.name + ' by name, ' + (j.stats.fuzzy || 0) + ' fuzzy) from ' +
+      (j.covered || 0) + ' guide(s)';
     const saved = j.savedFile ? ' · saved to selected source' : '';
     setStatus(j.failures && j.failures.length ? msg + ' · errors: ' + j.failures.join('; ') + saved : msg + saved);
     toast('Auto EPG: ' + msg + saved);
