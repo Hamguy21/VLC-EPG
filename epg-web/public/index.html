@@ -502,6 +502,51 @@ async function translateText(text, to) {
   } catch (_) { return text; }
 }
 
+// ---- grid-tile translation (visible programs only) ----
+let transGen = 0;              // bumped when language/toggle changes
+let transScrollT = null;
+function runPool(tasks, limit) {
+  let i = 0;
+  const workers = Array.from({ length: Math.min(limit, tasks.length) }, async () => {
+    while (i < tasks.length) await tasks[i++]();
+  });
+  return Promise.all(workers);
+}
+function visibleProgEls() {
+  const st = stage, top = st.scrollTop, bottom = top + st.clientHeight;
+  const out = [];
+  document.querySelectorAll('.prog:not(.noinfo)').forEach(el => {
+    const r = el.getBoundingClientRect();
+    const absTop = r.top + st.scrollTop;
+    if (absTop + r.height >= top && absTop <= bottom) out.push(el);
+  });
+  return out;
+}
+async function translateVisible() {
+  if (!state.translate) return;
+  const tasks = [];
+  for (const el of visibleProgEls()) {
+    if (+el.dataset._gen === transGen) continue;
+    const t = el.dataset.tt || '', d = el.dataset.desc || '';
+    tasks.push(async () => {
+      const [nt, nd] = await Promise.all([translateText(t, state.lang), translateText(d, state.lang)]);
+      if (nt && nt !== t) {
+        el.dataset.tt = nt;
+        const ttEl = el.querySelector('.tt'); if (ttEl) ttEl.textContent = nt;
+      }
+      if (nd && nd !== d) el.dataset.desc = nd;
+      el.dataset._gen = transGen;
+    });
+  }
+  if (tasks.length) await runPool(tasks, 4);
+}
+function scheduleTranslate() {
+  clearTimeout(transScrollT);
+  transScrollT = setTimeout(translateVisible, 200);
+}
+// Call after render() when auto-translate is on.
+function translateAfterRender() { if (state.translate) translateVisible(); }
+
 function toast(msg, isErr) {
   const t = $('toast'); t.textContent = String(msg); t.classList.add('show');
   t.style.background = isErr ? '#3a2226' : '#222a38';
@@ -662,11 +707,14 @@ $('tvMode').addEventListener('change', e => { applyTv(e.target.checked); });
 $('autoTranslate').addEventListener('change', e => {
   state.translate = e.target.checked;
   storageSet(LS_TRANS, state.translate ? '1' : '0');
+  transGen++;
+  if (state.translate) { if (state.channels.length) render(); else translateVisible(); }
   toast('Auto-translate ' + (state.translate ? 'on' : 'off'));
 });
 $('prefLang').addEventListener('change', e => {
   state.lang = e.target.value;
   storageSet(LS_LANG, state.lang);
+  transGen++;
   if (state.channels.length) render();
   toast('Preferred language: ' + (LANG_NAMES[state.lang] || state.lang.toUpperCase()));
 });
@@ -907,6 +955,7 @@ function render() {
 
   stage.innerHTML = html;
   stage.scrollLeft = Math.max(0, nowLeft - stage.clientWidth / 2);
+  translateAfterRender();
 
   // click channel row -> show channel details (unless clicking star)
   stage.querySelectorAll('.row').forEach((row) => {
@@ -1133,6 +1182,9 @@ stage.addEventListener('wheel', (e) => {
     stage.scrollLeft += e.deltaY;
   }
 }, { passive: false });
+
+// Debounced vertical-scroll translation for newly visible tiles.
+stage.addEventListener('scroll', scheduleTranslate, { passive: true });
 
 // ---- Remote / keyboard navigation (TV-style) ----
 function rowHeight() { return document.body.classList.contains('tv') ? 96 : 72; }
