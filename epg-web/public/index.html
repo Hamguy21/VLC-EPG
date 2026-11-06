@@ -474,6 +474,13 @@ function langVariant(variants, lang) {
 }
 function progTitle(p) { return langVariant(p && p.titles, state.lang) || (p && p.title) || ''; }
 function progDesc(p) { return langVariant(p && p.descs, state.lang) || (p && p.desc) || ''; }
+// True when the program already has a title in the preferred language, so no
+// translation should be requested for it.
+function progHasPreferredLang(p) {
+  if (!p || !state.lang || !Array.isArray(p.titles)) return false;
+  const l = String(state.lang).toLowerCase();
+  return p.titles.some(v => String(v.lang || '').toLowerCase() === l);
+}
 // Collect languages actually present in the loaded guide.
 function detectLanguages() {
   const set = new Set();
@@ -524,18 +531,20 @@ function visibleRows() {
   const bottomIdx = Math.min(state.view.length - 1, Math.ceil((st.scrollTop + st.clientHeight - ruler) / h));
   const rows = [];
   for (let i = topIdx; i <= bottomIdx; i++) {
-    const row = document.getElementById('row-' + i);
-    if (row) rows.push(row);
+    const el = document.getElementById('row-' + i);
+    if (el) rows.push({ el, i });
   }
   return rows;
 }
 async function translateVisible() {
   if (!state.translate) return;
   const tasks = [];
-  for (const row of visibleRows()) {
+  for (const { el: row, i } of visibleRows()) {
+    const ch = state.view[i];
     // channel column: name + now/next title
     const nameEl = row.querySelector('.ch .name');
     const nowTitleEl = row.querySelector('.ch .np-title');
+    const np = ch ? nowProgram(ch, Date.now()) : null;
     // program tiles in this row that are within the horizontal viewport
     const stRect = stage.getBoundingClientRect();
     const leftBound = stRect.left + (document.body.classList.contains('tv') ? 300 : 240);
@@ -547,9 +556,16 @@ async function translateVisible() {
     for (const el of [nameEl, nowTitleEl, ...tileEls]) {
       if (!el) continue;
       if (+el.dataset._gen === transGen) continue;
+      // If this text already comes from the preferred language, skip.
+      const isTile = el.classList.contains('prog');
+      if (isTile) {
+        const p = ch && (ch.programs || []).find(x => x.start === parseInt(el.dataset.start,10) && x.stop === parseInt(el.dataset.stop,10));
+        if (progHasPreferredLang(p)) { el.dataset._gen = transGen; continue; }
+      } else if (el === nowTitleEl) {
+        if (progHasPreferredLang(np)) { el.dataset._gen = transGen; continue; }
+      }
       const text = el.dataset.tt != null ? el.dataset.tt : el.textContent;
       if (!text || !text.trim()) { el.dataset._gen = transGen; continue; }
-      const isTile = el.classList.contains('prog');
       tasks.push(async () => {
         const spin = isTile ? document.createElement('div') : null;
         if (spin) { spin.className = 'trans-spin'; el.appendChild(spin); }
@@ -1167,7 +1183,7 @@ function showDetails(ch, p) {
   renderMeta(p, ch);
   $('dPlay').onclick = () => { playChannel(ch); };
   openDetails();
-  if (state.translate) localizeDrawer(title, desc);
+  if (state.translate && !progHasPreferredLang(p)) localizeDrawer(title, desc);
 }
 
 // Clicking a channel opens the bottom drawer: channel info, now program, upcoming list.
@@ -1202,7 +1218,7 @@ function showChannelDetails(ch) {
   }
   $('dPlay').onclick = () => { playChannel(ch); };
   openDetails();
-  if (state.translate && np) localizeDrawer(nowTitle, nowDesc);
+  if (state.translate && np && !progHasPreferredLang(np)) localizeDrawer(nowTitle, nowDesc);
 }
 // Translate the drawer title/description into the preferred language (async).
 async function localizeDrawer(title, desc) {
