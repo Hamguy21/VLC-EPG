@@ -1359,6 +1359,7 @@ async function playWeb(ch) {
   $p.style.display = 'flex';
   showLoader(true);
   dbgLog('web_open', { ch: ch.name });
+  state._qf = 0;   // fresh channel -> clear ad-loop backoff counter
   if (!vid._volBound) { vid._volBound = true; vid.addEventListener('volumechange', () => dbgLog('volume', { v: vid.volume, muted: vid.muted })); }
   if (hlsPlayer) { try { hlsPlayer.destroy(); } catch (_) {} hlsPlayer = null; }
   vid.pause(); vid.removeAttribute('src'); vid.load();
@@ -1460,7 +1461,10 @@ function monitorStall(ch, vid) {
     const now = Date.now();
     const playing = !vid.paused && vid.readyState >= 2;
     if (playing) {
-      if (vid.currentTime !== last) { last = vid.currentTime; lastAt = now; }
+      if (vid.currentTime !== last) {
+        last = vid.currentTime; lastAt = now;
+        if (vid.currentTime > 30) state._qf = 0;   // healthy playback -> clear ad-loop counter
+      }
       else if (now - lastAt > 12000) {
         if (vid._reconnects >= 10) { toast('Stream stalled repeatedly — check your connection. Use VLC if it continues.', true); clearInterval(vid._stall); return; }
         // Is the feed actually over (clean EOF) rather than a blip?
@@ -1483,10 +1487,19 @@ function monitorStall(ch, vid) {
         }
         vid._reconnects++;
         lastAt = now;
-        dbgLog('reconnect', { n: vid._reconnects, at: vid.currentTime });
+        // Ad-loop detection: if sessions keep dying quickly (<30s played), back
+        // off so we ride out the ad instead of immediately re-entering it.
+        const shortPlay = vid.currentTime < 30;
+        let qf = (state._qf || 0);
+        if (shortPlay) { qf++; } else { qf = 0; }
+        state._qf = qf;
+        const backoff = Math.min(30000, 3000 * Math.pow(2, qf - 1));  // 3s,6s,12s,24s,30s
+        dbgLog('reconnect', { n: vid._reconnects, at: vid.currentTime, backoff: backoff, qf: qf });
         if (vid._reconnects === 1) toast('Network blip — reconnecting (buffered playback will cover it)…');
+        else if (qf >= 3) toast('Ad/segment keeps stalling — retrying in ' + Math.round(backoff / 1000) + 's…');
         post('/stop', {}).catch(() => {});
-        startMp4(ch, true).catch(() => {});
+        if (backoff > 4000) showLoader(true);
+        setTimeout(() => { showLoader(false); startMp4(ch, true).catch(() => {}); }, backoff);
       }
     }
   }, 2000);
