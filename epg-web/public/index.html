@@ -206,6 +206,10 @@
     color:#cfd6e4; border-radius:6px; padding:3px 10px; font:11px ui-monospace,Consolas,monospace;
     cursor:pointer; margin-top:7px; display:inline-block; }
   .stats-copy:hover { background:rgba(255,255,255,.16); }
+  .dbg-overlay { position:absolute; top:44px; right:12px; z-index:6; width:380px;
+    max-width:calc(100% - 24px); background:rgba(0,0,0,.82); color:#cfd6e4;
+    font:11px/1.5 ui-monospace,Consolas,monospace; padding:10px 12px; border-radius:8px;
+    border:1px solid rgba(255,255,255,.15); pointer-events:auto; }
   .ctx-menu { position:absolute; z-index:10; background:#161b26; border:1px solid var(--border);
     border-radius:10px; box-shadow:0 8px 30px rgba(0,0,0,.5); min-width:190px; overflow:hidden; }
   .ctx-menu .ctx-item { padding:9px 14px; font-size:13px; cursor:pointer; display:flex; justify-content:space-between; gap:14px; }
@@ -461,6 +465,11 @@
       <button class="btn ghost small" id="speedtestBtn" style="margin-top:6px">▶ Run speed test</button>
       <div id="speedResult" style="margin-top:6px;font-size:12px;color:var(--muted)"></div>
     </div>
+    <div class="p-row">
+      <label class="fmt-opt" style="display:inline-flex;gap:8px">
+        <input type="checkbox" id="dbgMode"> Debug mode (record player/server events; Debug in the video menu)
+      </label>
+    </div>
 
     <div class="p-divider"></div>
     <div class="p-section">Display</div>
@@ -511,6 +520,7 @@
     <div class="spin"></div><div class="lbl">Buffering…</div>
   </div>
   <div class="stats-overlay" id="statsOverlay" style="display:none"></div>
+  <div class="dbg-overlay" id="dbgOverlay" style="display:none"></div>
   <div class="ctx-menu" id="ctxMenu" style="display:none"></div>
 </div>
 
@@ -518,7 +528,7 @@
 <script>
 const $ = id => document.getElementById(id);
 const stage = $('stage');
-const state = { channels: [], groups: [], now: Date.now(), fav: new Set(), current: null, dfmt: 'DMY', sel: null, view: [], lang: 'en', translate: false, fullscreen: false, netCache: 3000, relay: false, player: 'vlc', webBuffer: 30, hw: false, quality: 'auto' };
+const state = { channels: [], groups: [], now: Date.now(), fav: new Set(), current: null, dfmt: 'DMY', sel: null, view: [], lang: 'en', translate: false, fullscreen: false, netCache: 3000, relay: false, player: 'vlc', webBuffer: 30, hw: false, quality: 'auto', debug: false };
 let timer = null, toastTimer = null, activeLoadId = 0;
 const LS_SOURCES = 'vlcEpgSources';
 const LS_FAV = 'vlcEpgFavorites';
@@ -532,6 +542,7 @@ const LS_RELAY = 'vlcEpgRelay';
 const LS_PLAYER = 'vlcEpgPlayer';
 const LS_HW = 'vlcEpgHw';
 const LS_LAST = 'vlcEpgLastSrc';
+const LS_DEBUG = 'vlcEpgDebug';
 
 function storageGet(key, fallback) {
   try { const value = localStorage.getItem(key); return value == null ? fallback : value; }
@@ -856,6 +867,7 @@ function openSettings() {
   $('tvMode').checked = document.body.classList.contains('tv');
   $('fsMode').checked = state.fullscreen;
   $('hwMode').checked = state.hw;
+  $('dbgMode').checked = state.debug;
   $('netCache').value = state.netCache;
   $('webBuffer').value = state.webBuffer;
   $('relayMode').checked = state.relay;
@@ -878,6 +890,12 @@ $('hwMode').addEventListener('change', e => {
   state.hw = e.target.checked;
   storageSet(LS_HW, state.hw ? '1' : '0');
   toast('Hardware decoding ' + (state.hw ? 'on' : 'off') + ' (VLC)');
+});
+$('dbgMode').addEventListener('change', e => {
+  state.debug = e.target.checked;
+  storageSet(LS_DEBUG, state.debug ? '1' : '0');
+  if (state.debug) { dbgLog('debug_on', {}); toast('Debug mode on — events are being recorded'); }
+  else toast('Debug mode off');
 });
 $('speedtestBtn').addEventListener('click', runSpeedTest);
 $('netCache').addEventListener('change', e => {
@@ -1295,6 +1313,7 @@ async function runSpeedTest() {
     const uSec = (performance.now() - tU0) / 1000;
     const up = (uBytes / (1024 * 1024)) / uSec * 8;
     window._lastMbps = down;
+    dbgLog('speedtest', { down, up, lat });
     const f = m => m >= 10 ? m.toFixed(0) : m.toFixed(1);
     out.innerHTML = `<span style="color:var(--text)"><b>${f(down)}</b> Mbps ↓ download</span> · <b>${f(up)}</b> Mbps ↑ upload · <b>${lat.toFixed(0)}</b> ms latency · latency/packet-loss degrade real quality`;
     toast('Speed test done');
@@ -1327,23 +1346,35 @@ async function playWeb(ch) {
   $('wpTitle').textContent = ch.name;
   $p.style.display = 'flex';
   showLoader(true);
+  dbgLog('web_open', { ch: ch.name });
+  if (!vid._volBound) { vid._volBound = true; vid.addEventListener('volumechange', () => dbgLog('volume', { v: vid.volume, muted: vid.muted })); }
   if (hlsPlayer) { try { hlsPlayer.destroy(); } catch (_) {} hlsPlayer = null; }
   vid.pause(); vid.removeAttribute('src'); vid.load();
   vid._reconnects = 0;
   try {
     await startMp4(ch);
   } catch (e) {
-    try { await startHlsPlay(ch); }
-    catch (e2) { showLoader(false); toast('Web player failed: ' + e2.message, true); closeWeb(); }
+    dbgLog('mp4_failed', { msg: e.message });
+    try { dbgLog('hls_fallback', {}); await startHlsPlay(ch); }
+    catch (e2) { showLoader(false); dbgLog('web_failed', { msg: e2.message }); toast('Web player failed: ' + e2.message, true); closeWeb(); }
   }
 }
 function showLoader(on) { const l = $('wpLoading'); if (l) l.style.display = on ? 'flex' : 'none'; }
+
+// ---- Debug mode: record player/server events for diagnosis ----
+const dbg = { events: [] };
+function dbgLog(k, o) {
+  if (!state.debug) return;
+  dbg.events.push(Object.assign({ t: Date.now(), k }, o || {}));
+  if (dbg.events.length > 600) dbg.events.shift();
+}
 
 // Start the native MP4 relay and attach the video + auto-reconnect monitor.
 async function startMp4(ch, quiet) {
   const vid = $('wpVideo');
   const r4 = await post('/streammp4', { url: ch.url, buffer: state.webBuffer });
   if (r4.codecs) window._codecs = r4.codecs;
+  dbgLog('mp4_relay', { codecs: r4.codecs || null, buffer: state.webBuffer });
   vid.preload = 'auto';
   vid.src = r4.url;
   let metaDone = false;
@@ -1353,9 +1384,10 @@ async function startMp4(ch, quiet) {
       if (!metaDone && vid.readyState < 1) toast('Web player is still buffering — try the VLC player if this persists.', true);
     }, 10000);
   }
-  vid.onloadedmetadata = () => { metaDone = true; vid.play().catch(() => {}); };
-  vid.addEventListener('playing', () => showLoader(false), { once: true });
-  vid.onerror = () => {
+  vid.onloadedmetadata = () => { metaDone = true; dbgLog('loadedmetadata', { w: vid.videoWidth, h: vid.videoHeight }); vid.play().catch(() => {}); };
+  vid.addEventListener('playing', () => { showLoader(false); dbgLog('playing', { t: vid.currentTime }); }, { once: true });
+  vid.addEventListener('waiting', () => dbgLog('waiting', { t: vid.currentTime }), { once: false });
+  vid.onerror = () => { dbgLog('videofail', { code: vid.error && vid.error.code });
     if (vid.error && vid.error.code === 4) { vid.onerror = null; startHlsPlay(ch).catch(() => {}); }
   };
   vid.play().catch(() => {});
@@ -1377,6 +1409,7 @@ function monitorStall(ch, vid) {
         if (vid._reconnects >= 3) { toast('Stream stalled repeatedly — check your connection. Use VLC if it continues.', true); clearInterval(vid._stall); return; }
         vid._reconnects++;
         lastAt = now;
+        dbgLog('reconnect', { n: vid._reconnects, at: vid.currentTime });
         if (vid._reconnects === 1) toast('Network blip — reconnecting (buffered playback will cover it)…');
         post('/stop', {}).catch(() => {});
         startMp4(ch, true).catch(() => {});
@@ -1410,7 +1443,7 @@ function closeWeb() {
   if (hlsPlayer) { try { hlsPlayer.destroy(); } catch (_) {} hlsPlayer = null; }
   clearInterval(statsTimer); statsTimer = null;
   const vid = $('wpVideo'); clearTimeout(vid._wpWatch); clearInterval(vid._stall); vid.pause(); vid.removeAttribute('src'); vid.load(); vid.onerror = null; vid.onloadedmetadata = null;
-  $('ctxMenu').style.display = 'none'; $('statsOverlay').style.display = 'none'; showLoader(false);
+  $('ctxMenu').style.display = 'none'; $('statsOverlay').style.display = 'none'; $('dbgOverlay').style.display = 'none'; showLoader(false);
   $('webplayer').style.display = 'none';
   post('/stop', {}).catch(() => {});
 }
@@ -1421,6 +1454,7 @@ function showCtx(x, y, hasStats) {
   const menu = $('ctxMenu');
   const q = state.quality;
   menu.innerHTML =
+    (state.debug ? `<div class="ctx-item" data-act="dbg"><span>🐞 Debug records (export)</span><span class="chk"></span></div><div class="ctx-sep"></div>` : '') +
     `<div class="ctx-item" data-act="stats"><span>Stats for nerds</span><span class="chk">${hasStats ? '✓' : ''}</span></div>` +
     `<div class="ctx-sep"></div>` +
     `<div class="ctx-item" data-act="q-auto"><span>Quality</span><span class="chk">${q==='auto'?'Auto':''}</span></div>` +
@@ -1435,6 +1469,7 @@ function showCtx(x, y, hasStats) {
     it.addEventListener('click', () => {
       const act = it.dataset.act;
       if (act === 'stats') toggleStats();
+      else if (act === 'dbg') openDbg();
       else if (act.startsWith('q-')) {
         state.quality = act.slice(2);
         toast('Stream quality preference: ' + state.quality + ' (auto/priority; VLC uses adaptive HLS)');
@@ -1531,6 +1566,44 @@ function copyStatsFallback(t) {
   document.body.removeChild(ta);
 }
 $('statsOverlay').addEventListener('click', e => { if (e.target.closest('[data-copy]')) copyStats(); });
+
+// ---- Debug records overlay (open/export) ----
+async function openDbg() {
+  const ov = $('dbgOverlay');
+  let srv = [];
+  try { const j = await (await fetch('/debuglog')).json(); srv = j.events || []; } catch (_) {}
+  const fmt = e => {
+    const lbl = e.k || e.msg || '?';
+    const rest = (e.codecs ? ' codecs=' + JSON.stringify(e.codecs) : '') +
+      (e.msg && e.k ? ' msg=' + String(e.msg).slice(0, 120) : '') +
+      (e.code != null ? ' code=' + e.code : '');
+    return new Date(e.t).toLocaleTimeString() + ' ' + lbl + rest;
+  };
+  const lines = [...dbg.events.map(fmt), ...srv.map(e => '[srv] ' + fmt(e))].slice(-90).join('\n');
+  ov.innerHTML =
+    '<div style="font-weight:700;margin-bottom:6px">🐞 Debug records (' + dbg.events.length + ' client · ' + srv.length + ' server)</div>' +
+    '<pre style="max-height:300px;overflow:auto;white-space:pre-wrap;font:10px/1.4 ui-monospace,Consolas,monospace;margin:0 0 8px">' + escapeHtml(lines) + '</pre>' +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
+      '<button class="stats-copy" id="dbgExport">⬇ Export JSON</button>' +
+      '<button class="stats-copy" id="dbgClear">Clear client</button>' +
+      '<button class="stats-copy" id="dbgClose">Close</button>' +
+    '</div>';
+  ov.style.display = 'block';
+  $('dbgExport').onclick = () => exportDbg(srv);
+  $('dbgClear').onclick = () => { dbg.events = []; openDbg(); };
+  $('dbgClose').onclick = () => { ov.style.display = 'none'; };
+}
+function exportDbg(srv) {
+  const payload = {
+    app: 'vlc-epg', exportedAt: new Date().toISOString(),
+    state: { quality: state.quality, relay: state.relay, buffer: state.webBuffer, hw: state.hw },
+    player: { codecs: window._codecs || null, liveMbps: window._liveMbps || 0 },
+    clientEvents: dbg.events, serverEvents: srv
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'epg-debug.json'; document.body.appendChild(a); a.click(); a.remove();
+  toast('Debug log exported (epg-debug.json)');
+}
 document.getElementById('wpVideo').addEventListener('contextmenu', e => {
   e.preventDefault();
   const hasStats = $('statsOverlay').style.display === 'block';
@@ -1830,6 +1903,7 @@ state.translate = storageGet(LS_TRANS, '0') === '1';
 state.fullscreen = storageGet(LS_FS, '0') === '1';
 state.relay = storageGet(LS_RELAY, '0') === '1';
 state.hw = storageGet(LS_HW, '0') === '1';
+state.debug = storageGet(LS_DEBUG, '0') === '1';
 state.player = storageGet(LS_PLAYER, 'vlc') === 'web' ? 'web' : 'vlc';
 updatePlayerSeg();
 try { const nc = parseInt(storageGet(LS_NETCACHE, '3000'), 10); if (nc >= 300 && nc <= 10000) state.netCache = nc; } catch (_) {}

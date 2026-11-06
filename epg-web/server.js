@@ -470,6 +470,7 @@ function playStream(url, name, opts) {
     return Promise.reject(Object.assign(new Error('unsupported stream protocol'), { status: 400 }));
   }
   if (typeof name === 'string') name = name.replace(/[\u0000-\u001f\u007f]/g, '').slice(0, 180);
+  sev('play', { url: url.slice(0, 140), relay: false, hw: !!(opts && opts.hw) });
   return launchVlc(url, name, opts && opts.fullscreen, opts && opts.hw);
 }
 
@@ -569,6 +570,10 @@ let mp4Slug = null;
 let mp4BufferMs = 30000;
 let mp4Head = [];   // accumulated ffmpeg stderr (all) for codec parsing
 let mp4LiveMbps = 0;  // measured delivery throughput to the web client (Mbps)
+let serverEvents = []; // ring buffer of server-side diagnostic events
+function sev(msg, extra) {
+  try { serverEvents.push(Object.assign({ t: Date.now(), msg }, extra || {})); if (serverEvents.length > 400) serverEvents.shift(); } catch (_) {}
+}
 
 // Shared bitrate estimate (bytes/sec) of the relay output, used to size the
 // pre-roll and buffer windows in wall-clock terms.
@@ -630,6 +635,7 @@ function startMp4Relay(url, opts) {
     try { child = spawn(FFMPEG, args, { detached: false }); }
     catch (e) { return reject(new Error('failed to start FFmpeg: ' + e.message)); }
     mp4Child = child; mp4File = file; mp4Slug = slug; mp4BufferMs = bufferMs;
+    sev('relay_start', { slug, url });
     const errLines = [];
     const headLines = [];
     child.stderr.on('data', d => {
@@ -640,9 +646,10 @@ function startMp4Relay(url, opts) {
     let settled = false;
     const fail = msg => { if (settled) return; settled = true; stopMp4Relay(); const er = new Error(msg); er.status = 422; reject(er); };
     const done = () => { if (settled) return; settled = true; resolve({ url: `http://127.0.0.1:${PORT}/relaymp4/${slug}/live.mp4`, relay: true, slug, codecs: codecs() }); };
-    child.on('error', e => fail('FFmpeg failed to start: ' + e.message));
+    child.on('error', e => { sev('relay_error', { slug, msg: e.message }); fail('FFmpeg failed to start: ' + e.message); });
     child.on('exit', code => {
       if (mp4Child === child) mp4Child = null;
+      sev('relay_exit', { slug, code });
       setTimeout(() => { if (!fs.existsSync(file) || fs.statSync(file).size < 4096) fail('FFmpeg exited (code ' + code + ') ' + errLines.join(' ').slice(-200)); }, 60);
     });
     const t0 = Date.now();
@@ -653,7 +660,7 @@ function startMp4Relay(url, opts) {
       const preRollBytes = brBps() * preRollSec;
       const ready = sz >= Math.max(262144, Math.min(preRollBytes, brBps() * 60));
       if (ready) { clearInterval(wait); done(); }
-      else if (elapsed > 60000) { clearInterval(wait); fail('MP4 relay timed out: ' + errLines.join(' ').slice(-200)); }
+      else if (elapsed > 60000) { clearInterval(wait); const m = 'MP4 relay timed out: ' + errLines.join(' ').slice(-200); sev('relay_timeout', { slug, msg: m }); fail(m); }
     }, 300);
   });
 }
@@ -1146,6 +1153,11 @@ const server = http.createServer(async (req, res) => {
       return sendJSON(res, 200, r);
     }
 
+    // Server-side diagnostic log (for Debug mode export).
+    if (p === '/debuglog' && req.method === 'GET') {
+      return sendJSON(res, 200, { now: Date.now(), events: serverEvents });
+    }
+
     // Current relay codec info (for Stats-for-nerds).
     if (p === '/relayinfo' && req.method === 'GET') {
       const text = mp4Head.join('\n');
@@ -1254,6 +1266,7 @@ const server = http.createServer(async (req, res) => {
   } catch (e) {
     if (res.headersSent) { res.destroy(); return; }
     const status = Number.isInteger(e.status) ? e.status : 500;
+    sev('http_error', { path: p, method: req.method, status });
     if (status >= 500) console.error(new Date().toISOString(), req.method, p, e.stack || e);
     return sendJSON(res, status, { error: status >= 500 ? 'internal server error' : String(e.message || e) });
   }
