@@ -216,6 +216,8 @@
   .panel .fmt-opt.sel { border-color:var(--accent); background:rgba(86,115,245,.12); }
   .panel .fmt-opt input { accent-color:var(--accent); }
   .panel .p-actions { display:flex; gap:8px; margin-top:16px; justify-content:flex-end; }
+  .panel .pref-lang { width:100%; padding:7px 10px; border-radius:8px; border:1px solid var(--border);
+    background:var(--panel2); color:var(--text); font-size:13px; }
 
   /* Production polish */
   :root {
@@ -386,6 +388,16 @@
         <input type="checkbox" id="tvMode"> TV mode (bigger UI for remote / distance)
       </label>
     </div>
+    <div class="p-row">
+      <span class="p-lbl">Preferred language</span>
+      <select id="prefLang" class="pref-lang"></select>
+      <div style="margin-top:6px;font-size:12px;color:var(--muted)" id="langHint"></div>
+    </div>
+    <div class="p-row">
+      <label class="fmt-opt" style="display:inline-flex;gap:8px">
+        <input type="checkbox" id="autoTranslate"> Auto-translate missing programmes to my language
+      </label>
+    </div>
     <div class="p-actions">
       <button class="btn ghost" id="settClose">Close</button>
     </div>
@@ -397,12 +409,14 @@
 <script>
 const $ = id => document.getElementById(id);
 const stage = $('stage');
-const state = { channels: [], groups: [], now: Date.now(), fav: new Set(), current: null, dfmt: 'DMY', sel: null, view: [] };
+const state = { channels: [], groups: [], now: Date.now(), fav: new Set(), current: null, dfmt: 'DMY', sel: null, view: [], lang: 'en', translate: false };
 let timer = null, toastTimer = null, activeLoadId = 0;
 const LS_SOURCES = 'vlcEpgSources';
 const LS_FAV = 'vlcEpgFavorites';
 const LS_DFMT = 'vlcEpgDateFormat';
 const LS_TV = 'vlcEpgTvMode';
+const LS_LANG = 'vlcEpgLang';
+const LS_TRANS = 'vlcEpgTranslate';
 
 function storageGet(key, fallback) {
   try { const value = localStorage.getItem(key); return value == null ? fallback : value; }
@@ -423,6 +437,70 @@ function loadDfmt() { const v = storageGet(LS_DFMT, 'DMY'); if (['YMD','MDY'].in
 function saveDfmt() { storageSet(LS_DFMT, state.dfmt); }
 function loadTv() { if (storageGet(LS_TV, '0') === '1') document.body.classList.add('tv'); }
 function applyTv(on) { document.body.classList.toggle('tv', on); storageSet(LS_TV, on ? '1' : '0'); }
+
+/* ---------- language + translation ---------- */
+const LANG_NAMES = {
+  en:'English', es:'Spanish', fr:'French', de:'German', pt:'Portuguese', it:'Italian',
+  nl:'Dutch', tr:'Turkish', ru:'Russian', ar:'Arabic', hi:'Hindi', zh:'Chinese',
+  ja:'Japanese', ko:'Korean', pl:'Polish', id:'Indonesian', ms:'Malay', th:'Thai',
+  vi:'Vietnamese', sv:'Swedish', da:'Danish', no:'Norwegian', fi:'Finnish', cs:'Czech',
+  el:'Greek', hu:'Hungarian', ro:'Romanian', uk:'Ukrainian', he:'Hebrew', ca:'Catalan',
+  bg:'Bulgarian', hr:'Croatian', sr:'Serbian', sk:'Slovak', sl:'Slovenian',
+  lt:'Lithuanian', lv:'Latvian', et:'Estonian', is:'Icelandic', sq:'Albanian',
+  bs:'Bosnian', mk:'Macedonian', mt:'Maltese', ga:'Irish', cy:'Welsh', eu:'Basque',
+  gl:'Galician', fa:'Persian', ur:'Urdu', bn:'Bengali', ta:'Tamil', te:'Telugu',
+  ml:'Malayalam', kn:'Kannada', mr:'Marathi', gu:'Gujarati', pa:'Punjabi',
+  sw:'Swahili', tl:'Tagalog', lo:'Lao', km:'Khmer', my:'Burmese', ne:'Nepali',
+  si:'Sinhala', az:'Azerbaijani', ka:'Georgian', hy:'Armenian', kk:'Kazakh',
+  uz:'Uzbek', ps:'Pashto', am:'Amharic', ha:'Hausa', yo:'Yoruba', ig:'Igbo',
+  zu:'Zulu', af:'Afrikaans', st:'Sotho', sn:'Shona', mg:'Malagasy', jw:'Javanese',
+  su:'Sundanese', ceb:'Cebuano'
+};
+// Pick the best variant for the preferred language (fallback EN, then first).
+function langVariant(variants, lang) {
+  if (!variants || !variants.length) return '';
+  const l = String(lang || '').toLowerCase();
+  const p = variants.find(v => String(v.lang || '').toLowerCase() === l);
+  if (p) return p.text;
+  const e = variants.find(v => String(v.lang || '').toLowerCase() === 'en');
+  if (e) return e.text;
+  return variants[0].text;
+}
+function progTitle(p) { return langVariant(p && p.titles, state.lang) || (p && p.title) || ''; }
+function progDesc(p) { return langVariant(p && p.descs, state.lang) || (p && p.desc) || ''; }
+// Collect languages actually present in the loaded guide.
+function detectLanguages() {
+  const set = new Set([state.lang]);
+  for (const ch of state.channels) for (const p of (ch.programs || [])) {
+    for (const t of (p.titles || [])) if (t.lang) set.add(t.lang);
+    for (const d of (p.descs || [])) if (d.lang) set.add(d.lang);
+  }
+  return [...set].filter(Boolean).sort();
+}
+function fillLangSelect() {
+  const sel = $('prefLang');
+  const langs = detectLanguages();
+  const choices = langs.length ? langs : ['en'];
+  const all = new Set([...choices, 'en', ...Object.keys(LANG_NAMES)]);
+  sel.innerHTML = [...all].map(l =>
+    `<option value="${l}" ${l === state.lang ? 'selected' : ''}>${LANG_NAMES[l] || l.toUpperCase()}</option>`).join('');
+  $('langHint').textContent = langs.length
+    ? 'Languages in this EPG: ' + langs.map(l => LANG_NAMES[l] || l.toUpperCase()).join(', ')
+    : 'Load a guide to see available languages.';
+}
+// Best-effort translation with an in-memory cache.
+const transCache = new Map();
+async function translateText(text, to) {
+  if (!text || !to) return text;
+  const key = text + '\u0001' + to;
+  if (transCache.has(key)) return transCache.get(key);
+  try {
+    const r = await post('/translate', { text, to });
+    const out = (r && r.text) || text;
+    transCache.set(key, out);
+    return out;
+  } catch (_) { return text; }
+}
 
 function toast(msg, isErr) {
   const t = $('toast'); t.textContent = String(msg); t.classList.add('show');
@@ -573,12 +651,25 @@ function openSettings() {
     r.closest('.fmt-opt').classList.toggle('sel', sel);
   });
   $('tvMode').checked = document.body.classList.contains('tv');
+  $('autoTranslate').checked = state.translate;
+  fillLangSelect();
   $('overlay').classList.add('open');
 }
 function closeSettings() { $('overlay').classList.remove('open'); }
 $('settingsBtn').addEventListener('click', openSettings);
 $('settClose').addEventListener('click', closeSettings);
 $('tvMode').addEventListener('change', e => { applyTv(e.target.checked); });
+$('autoTranslate').addEventListener('change', e => {
+  state.translate = e.target.checked;
+  storageSet(LS_TRANS, state.translate ? '1' : '0');
+  toast('Auto-translate ' + (state.translate ? 'on' : 'off'));
+});
+$('prefLang').addEventListener('change', e => {
+  state.lang = e.target.value;
+  storageSet(LS_LANG, state.lang);
+  if (state.channels.length) render();
+  toast('Preferred language: ' + (LANG_NAMES[state.lang] || state.lang.toUpperCase()));
+});
 $('overlay').addEventListener('click', e => { if (e.target === $('overlay')) closeSettings(); });
 $('fmtOpts').addEventListener('change', e => {
   if (e.target.name !== 'dfmt') return;
@@ -798,10 +889,11 @@ function render() {
       if (w < 6) continue;
       const isNow = p.start <= now && p.stop > now;
       const tl = `${fmtTime(p.start)}–${fmtTime(p.stop)}`;
+      const pt = progTitle(p), pd = progDesc(p);
       html += `<div class="prog ${isNow?'now':''}" style="left:${left}px;width:${w}px" ` +
-        `data-idx="${idx}" data-tt="${escapeHtml(p.title)}" data-desc="${escapeHtml(p.desc||'')}" data-cat="${escapeHtml(p.cat||'')}" data-icon="${escapeHtml(p.icon||'')}" data-start="${p.start}" data-stop="${p.stop}">` +
+        `data-idx="${idx}" data-tt="${escapeHtml(pt)}" data-desc="${escapeHtml(pd)}" data-cat="${escapeHtml(p.cat||'')}" data-icon="${escapeHtml(p.icon||'')}" data-start="${p.start}" data-stop="${p.stop}">` +
         `<div class="t">${tl}</div>` +
-        `<div class="tt">${escapeHtml(p.title)}</div>` +
+        `<div class="tt">${escapeHtml(pt)}</div>` +
         (p.cat ? `<div class="d">${escapeHtml(p.cat)}</div>` : '') +
         '</div>';
     }
@@ -962,34 +1054,41 @@ function setDrawerIcon(url) {
 }
 
 function showDetails(ch, p) {
-  $('dTitle').textContent = p.title || ch.name;
+  const title = progTitle(p) || p.title || ch.name;
+  const desc = progDesc(p) || p.desc || 'No synopsis available.';
+  $('dTitle').textContent = title;
   $('dSub').textContent = ch.name + (p.cat ? ' · ' + p.cat : '');
   $('dTime').textContent = (p.start && p.stop) ? (fmtTime(p.start) + ' – ' + fmtTime(p.stop)) : '';
-  $('dDesc').textContent = p.desc || 'No synopsis available.';
+  $('dDesc').textContent = desc;
   $('dList').innerHTML = '';
   setDrawerIcon((p.icon && p.icon.trim()) || (ch.logo && ch.logo.trim()));
   renderMeta(p, ch);
   $('dPlay').onclick = () => { playChannel(ch); };
   openDetails();
+  if (state.translate) localizeDrawer(title, desc);
 }
 
 // Clicking a channel opens the bottom drawer: channel info, now program, upcoming list.
 function showChannelDetails(ch) {
   const np = nowProgram(ch, Date.now());
+  const nowTitle = np ? (progTitle(np) || np.title) : '';
+  const nowDesc = np ? (progDesc(np) || np.desc || '') : '';
   $('dTitle').textContent = ch.name;
   $('dSub').textContent = (ch.group ? ch.group : '') + (ch.epg ? ' · has EPG' : ' · no EPG');
-  $('dTime').textContent = np ? ('Now: ' + np.title + '  ' + fmtTime(np.start) + '–' + fmtTime(np.stop)) : '';
-  $('dDesc').textContent = np ? (np.desc || '') : 'No program information available for this channel.';
+  $('dTime').textContent = np ? ('Now: ' + nowTitle + '  ' + fmtTime(np.start) + '–' + fmtTime(np.stop)) : '';
+  $('dDesc').textContent = np ? (nowDesc || '') : 'No program information available for this channel.';
   setDrawerIcon((np && np.icon && np.icon.trim()) || (ch.logo && ch.logo.trim()));
   renderMeta(np, ch);
   // upcoming program list
   const now = Date.now();
   const upcoming = (ch.programs || []).filter(p => p.stop > now).slice(0, 10);
   if (upcoming.length) {
-    $('dList').innerHTML = '<div class="dl-head">Upcoming</div>' + upcoming.map(p =>
-      `<div class="dl-item" data-start="${p.start}" data-stop="${p.stop}" ` +
-      `data-tt="${escapeHtml(p.title)}" data-desc="${escapeHtml(p.desc||'')}" ` +
-      `data-cat="${escapeHtml(p.cat||'')}"><span class="dl-time">${fmtDateTime(p.start)}</span> ${escapeHtml(p.title)}</div>`).join('');
+    $('dList').innerHTML = '<div class="dl-head">Upcoming</div>' + upcoming.map(p => {
+      const pt = progTitle(p), pd = progDesc(p);
+      return `<div class="dl-item" data-start="${p.start}" data-stop="${p.stop}" ` +
+      `data-tt="${escapeHtml(pt)}" data-desc="${escapeHtml(pd)}" ` +
+      `data-cat="${escapeHtml(p.cat||'')}"><span class="dl-time">${fmtDateTime(p.start)}</span> ${escapeHtml(pt)}</div>`;
+    }).join('');
     $('dList').querySelectorAll('.dl-item').forEach(it => {
       it.addEventListener('click', () => {
         showDetails(ch, { title: it.dataset.tt, desc: it.dataset.desc, cat: it.dataset.cat,
@@ -1001,6 +1100,13 @@ function showChannelDetails(ch) {
   }
   $('dPlay').onclick = () => { playChannel(ch); };
   openDetails();
+  if (state.translate && np) localizeDrawer(nowTitle, nowDesc);
+}
+// Translate the drawer title/description into the preferred language (async).
+async function localizeDrawer(title, desc) {
+  const [tt, dd] = await Promise.all([translateText(title, state.lang), translateText(desc, state.lang)]);
+  if (tt && tt !== title && $('dTitle').textContent === title) $('dTitle').textContent = tt;
+  if (dd && dd !== desc && $('dDesc').textContent === desc) $('dDesc').textContent = dd;
 }
 
 /* events */
@@ -1014,15 +1120,6 @@ $('window').addEventListener('change', () => { if (state.channels.length) render
 $('m3u').addEventListener('keydown', e => { if (e.key === 'Enter') loadGuide(); });
 $('xmltv').addEventListener('keydown', e => { if (e.key === 'Enter') loadGuide(); });
 $('dClose').addEventListener('click', closeDetails);
-$('stopPlay').addEventListener('click', async () => {
-  try {
-    await post('/stop', {});
-    state.current = null;
-    $('nowbar').style.display = 'none';
-    render();
-    toast('Playback stopped');
-  } catch (e) { toast('Stop failed: ' + e.message, true); }
-});
 
 // Horizontal wheel-scroll over the timeline (scroll rows left/right).
 stage.addEventListener('wheel', (e) => {
@@ -1156,6 +1253,8 @@ switch (e.key) {
 loadFav();
 loadDfmt();
 loadTv();
+try { const l = storageGet(LS_LANG, 'en'); if (/^[a-z]{2,3}$/.test(l)) state.lang = l; } catch (_) {}
+state.translate = storageGet(LS_TRANS, '0') === '1';
 refreshSavedDropdown('');
 </script>
 </body>
