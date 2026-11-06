@@ -20,7 +20,7 @@ const zlib = require('zlib');
 const crypto = require('crypto');
 const dns = require('dns').promises;
 const net = require('net');
-const { spawn } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 
 const PORT = process.env.PORT || 8123;
 const VLC = process.env.VLC_BIN || (
@@ -35,6 +35,18 @@ const FETCH_TIMEOUT = 30000;
 const MAX_REDIRECTS = 4;
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const SAVE_DIR = path.join(__dirname, 'data');
+const RELAY_DIR = path.join(SAVE_DIR, 'relay');
+
+// Resolve an FFmpeg binary (env override, PATH, or the bundled Hermes copy).
+const FFMPEG = (() => {
+  const cands = process.env.FFMPEG_BIN
+    ? [process.env.FFMPEG_BIN]
+    : ['ffmpeg', 'C:\\Users\\Ham\\AppData\\Local\\hermes\\tools\\ffmpeg-9.0.1-win32-x64\\bin\\ffmpeg.EXE'];
+  for (const c of cands) {
+    try { const r = spawnSync(c, ['-version'], { stdio: 'ignore' }); if (r.status === 0) return c; } catch (_) {}
+  }
+  return null;
+})();
 
 /* ------------------------------------------------------------------ */
 /* HTTP helpers                                                        */
@@ -424,6 +436,28 @@ let vlcChild = null;
 // Chrome 133 Desktop (x86_64) UA the playlists use, keep a generous network
 // cache, and add a live cache so ad-transition stalls don't drop the stream.
 const DEFAULT_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36';
+
+function launchVlc(url, name, fullscreen) {
+  return new Promise((resolve, reject) => {
+    if (vlcChild) { try { vlcChild.kill(); } catch (_) {} vlcChild = null; }
+    const args = ['--no-video-title-show'];
+    args.push('--network-caching=3000');
+    args.push('--live-caching=1500');
+    args.push('--http-user-agent=' + DEFAULT_UA);
+    if (fullscreen) args.push('--fullscreen');
+    if (name) args.push('--meta-title=' + name);
+    args.push(url);
+    let child;
+    try { child = spawn(VLC, args, { detached: false }); }
+    catch (e) { return reject(new Error('failed to launch VLC: ' + e.message)); }
+    vlcChild = child;
+    const onErr = e => { if (vlcChild === child) vlcChild = null; reject(new Error('failed to launch VLC: ' + e.message)); };
+    child.once('error', onErr);
+    child.once('spawn', () => { child.removeListener('error', onErr); resolve({ launched: true, url }); });
+    child.once('exit', () => { if (vlcChild === child) vlcChild = null; });
+  });
+}
+
 function playStream(url, name, opts) {
   if (typeof url !== 'string' || url.length > 8192 || /[\u0000-\u001f\u007f]/.test(url) || url.startsWith('-')) {
     return Promise.reject(Object.assign(new Error('invalid stream URL'), { status: 400 }));
@@ -435,37 +469,63 @@ function playStream(url, name, opts) {
     return Promise.reject(Object.assign(new Error('unsupported stream protocol'), { status: 400 }));
   }
   if (typeof name === 'string') name = name.replace(/[\u0000-\u001f\u007f]/g, '').slice(0, 180);
+  return launchVlc(url, name, opts && opts.fullscreen);
+}
+
+/* ---------- FFmpeg relay ---------- */
+// Re-streams the upstream over a local HLS so VLC never talks to the origin
+// (fixes header-sensitive sources like Pluto that drop direct connections).
+let relayChild = null;
+let relayDir = null;
+function stopRelay() {
+  if (relayChild) { try { relayChild.kill(); } catch (_) {} relayChild = null; }
+  if (relayDir) { try { fs.rmSync(relayDir, { recursive: true, force: true }); } catch (_) {} relayDir = null; }
+}
+function playRelay(url, opts) {
   return new Promise((resolve, reject) => {
-    if (vlcChild) { try { vlcChild.kill(); } catch (_) {} vlcChild = null; }
-    const args = ['--no-video-title-show'];
-    const cache = opts && opts.networkCaching ? Math.min(10000, Math.max(300, +opts.networkCaching)) : 3000;
-    args.push('--network-caching=' + cache);
-    args.push('--live-caching=' + Math.round(cache / 2));
-    args.push('--http-user-agent=' + (opts && opts.userAgent ? String(opts.userAgent).slice(0, 240) : DEFAULT_UA));
-    if (opts && opts.fullscreen) args.push('--fullscreen');
-    if (name) args.push('--meta-title=' + name);
-    args.push(url);
+    if (!FFMPEG) return reject(new Error('FFmpeg is not available on this system'));
+    stopRelay();
+    const slug = 's' + Date.now().toString(36);
+    const dir = path.join(RELAY_DIR, slug);
+    fs.mkdirSync(dir, { recursive: true });
+    const playlist = path.join(dir, 'index.m3u8');
+    const args = [
+      '-hide_banner', '-loglevel', 'error',
+      '-user_agent', DEFAULT_UA,
+      '-headers', 'X-Forwarded-For: 102.88.71.139\r\n',
+      '-i', url,
+      '-c', 'copy',
+      '-f', 'hls',
+      '-hls_time', '2', '-hls_list_size', '6',
+      '-hls_flags', 'delete_segments+independent_segments',
+      '-hls_segment_filename', path.join(dir, 'seg_%05d.ts'),
+      playlist,
+    ];
     let child;
-    try {
-      child = spawn(VLC, args, { detached: false });
-    } catch (e) {
-      return reject(new Error('failed to launch VLC: ' + e.message));
-    }
-    vlcChild = child;
-    const onErr = e => {
-      if (vlcChild === child) vlcChild = null;
-      reject(new Error('failed to launch VLC: ' + e.message));
-    };
-    child.once('error', onErr);
-    child.once('spawn', () => {
-      child.removeListener('error', onErr);
-      resolve({ launched: true, url });
-    });
-    child.once('exit', () => { if (vlcChild === child) vlcChild = null; });
+    try { child = spawn(FFMPEG, args, { detached: false }); }
+    catch (e) { return reject(new Error('failed to start FFmpeg: ' + e.message)); }
+    relayChild = child; relayDir = dir;
+    child.on('error', e => { if (relayChild === child) relayChild = null; reject(new Error('FFmpeg failed: ' + e.message)); });
+    child.on('exit', () => { if (relayChild === child) { relayChild = null; relayDir = null; } });
+    const t0 = Date.now();
+    const wait = setInterval(() => {
+      if (fs.existsSync(playlist)) {
+        clearInterval(wait);
+        const playUrl = `http://127.0.0.1:${PORT}/relay/${slug}/index.m3u8`;
+        launchVlc(playUrl, opts && opts.name, opts && opts.fullscreen)
+          .then(() => resolve({ launched: true, url, relay: true, playUrl }))
+          .catch(reject);
+      } else if (Date.now() - t0 > 20000) {
+        clearInterval(wait);
+        stopRelay();
+        reject(new Error('FFmpeg relay timed out starting'));
+      }
+    }, 400);
   });
 }
 function stopPlay() {
   if (vlcChild) { try { vlcChild.kill(); } catch (_) {} vlcChild = null; }
+  stopRelay();
   return { stopped: true };
 }
 
@@ -841,9 +901,11 @@ const server = http.createServer(async (req, res) => {
     if (p === '/play' && req.method === 'POST') {
       if (req.headers['content-type']?.split(';')[0].trim() !== 'application/json')
         throw Object.assign(new Error('content-type must be application/json'), { status: 415 });
-      const { url, name, fullscreen, networkCaching, userAgent } = parseJSON(await readBody(req));
+      const { url, name, fullscreen, networkCaching, userAgent, relay } = parseJSON(await readBody(req));
       if (typeof url !== 'string' || !url.trim()) throw Object.assign(new Error('url is required'), { status: 400 });
-      const r = await playStream(url, name, { fullscreen: !!fullscreen, networkCaching, userAgent });
+      let r;
+      if (relay) r = await playRelay(url, { name, fullscreen: !!fullscreen });
+      else r = await playStream(url, name, { fullscreen: !!fullscreen, networkCaching, userAgent });
       return sendJSON(res, 200, r);
     }
 
@@ -888,6 +950,22 @@ const server = http.createServer(async (req, res) => {
         ? gdata[0].map(seg => (seg && seg[0]) || '').join('')
         : text;
       return sendJSON(res, 200, { text: gout, from: (gdata && gdata[2]) || 'auto' });
+    }
+
+    // Serve local HLS segments produced by the FFmpeg relay.
+    if (p.startsWith('/relay/')) {
+      const rel = p.slice('/relay/'.length);
+      const abs = path.join(RELAY_DIR, path.normalize(rel));
+      if (!abs.startsWith(RELAY_DIR + path.sep)) return sendJSON(res, 403, { error: 'forbidden' });
+      fs.readFile(abs, (err, buf) => {
+        if (err) return sendJSON(res, 404, { error: 'not found' });
+        const type = abs.endsWith('.m3u8') ? 'application/vnd.apple.mpegurl'
+          : abs.endsWith('.ts') ? 'video/mp2t'
+          : 'application/octet-stream';
+        res.writeHead(200, { 'Content-Type': type, 'Content-Length': buf.length, 'Cache-Control': 'no-store' });
+        res.end(buf);
+      });
+      return;
     }
 
     return sendJSON(res, 404, { error: 'not found' });
