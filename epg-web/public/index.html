@@ -470,6 +470,11 @@
         <input type="checkbox" id="dbgMode"> Debug mode (record player/server events; Debug in the video menu)
       </label>
     </div>
+    <div class="p-row">
+      <label class="fmt-opt" style="display:inline-flex;gap:8px">
+        <input type="checkbox" id="arMode"> Auto-restart segmented channels (e.g. Pluto)
+      </label>
+    </div>
 
     <div class="p-divider"></div>
     <div class="p-section">Display</div>
@@ -528,7 +533,7 @@
 <script>
 const $ = id => document.getElementById(id);
 const stage = $('stage');
-const state = { channels: [], groups: [], now: Date.now(), fav: new Set(), current: null, dfmt: 'DMY', sel: null, view: [], lang: 'en', translate: false, fullscreen: false, netCache: 3000, relay: false, player: 'vlc', webBuffer: 30, hw: false, quality: 'auto', debug: false };
+const state = { channels: [], groups: [], now: Date.now(), fav: new Set(), current: null, dfmt: 'DMY', sel: null, view: [], lang: 'en', translate: false, fullscreen: false, netCache: 3000, relay: false, player: 'vlc', webBuffer: 30, hw: false, quality: 'auto', debug: false, autoRestart: true };
 let timer = null, toastTimer = null, activeLoadId = 0;
 const LS_SOURCES = 'vlcEpgSources';
 const LS_FAV = 'vlcEpgFavorites';
@@ -543,6 +548,7 @@ const LS_PLAYER = 'vlcEpgPlayer';
 const LS_HW = 'vlcEpgHw';
 const LS_LAST = 'vlcEpgLastSrc';
 const LS_DEBUG = 'vlcEpgDebug';
+const LS_AR = 'vlcEpgAutoRestart';
 
 function storageGet(key, fallback) {
   try { const value = localStorage.getItem(key); return value == null ? fallback : value; }
@@ -868,6 +874,7 @@ function openSettings() {
   $('fsMode').checked = state.fullscreen;
   $('hwMode').checked = state.hw;
   $('dbgMode').checked = state.debug;
+  $('arMode').checked = state.autoRestart;
   $('netCache').value = state.netCache;
   $('webBuffer').value = state.webBuffer;
   $('relayMode').checked = state.relay;
@@ -896,6 +903,11 @@ $('dbgMode').addEventListener('change', e => {
   storageSet(LS_DEBUG, state.debug ? '1' : '0');
   if (state.debug) { dbgLog('debug_on', {}); toast('Debug mode on — events are being recorded'); }
   else toast('Debug mode off');
+});
+$('arMode').addEventListener('change', e => {
+  state.autoRestart = e.target.checked;
+  storageSet(LS_AR, state.autoRestart ? '1' : '0');
+  toast('Auto-restart segmented channels ' + (state.autoRestart ? 'on' : 'off'));
 });
 $('speedtestBtn').addEventListener('click', runSpeedTest);
 $('netCache').addEventListener('change', e => {
@@ -1439,7 +1451,7 @@ function monitorStall(ch, vid) {
         if (ended) {
           // Pluto-style feeds arrive in short, bounded segments. If we got real
           // playback before EOF, auto-restart to keep viewing; otherwise give up.
-          if (vid._eofRestarts < 4 && last > 5) {
+          if (state.autoRestart && vid._eofRestarts < 4 && last > 5) {
             vid._eofRestarts++;
             dbgLog('eof_restart', { n: vid._eofRestarts });
             toast('Channel streams in short segments — auto-restarting (' + vid._eofRestarts + ')…');
@@ -1949,6 +1961,7 @@ state.fullscreen = storageGet(LS_FS, '0') === '1';
 state.relay = storageGet(LS_RELAY, '0') === '1';
 state.hw = storageGet(LS_HW, '0') === '1';
 state.debug = storageGet(LS_DEBUG, '0') === '1';
+state.autoRestart = storageGet(LS_AR, '1') === '1';
 state.player = storageGet(LS_PLAYER, 'vlc') === 'web' ? 'web' : 'vlc';
 updatePlayerSeg();
 try { const nc = parseInt(storageGet(LS_NETCACHE, '3000'), 10); if (nc >= 300 && nc <= 10000) state.netCache = nc; } catch (_) {}
