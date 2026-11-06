@@ -111,6 +111,11 @@
     transition:background .12s, border-color .12s; }
   .prog:hover { background:#262d3a; border-color:var(--accent2); }
   .prog.now { border-left-color:var(--now); }
+  .trans-spin { position:absolute; top:4px; right:4px; width:12px; height:12px;
+    border:2px solid rgba(255,255,255,.22); border-top-color:var(--accent);
+    border-radius:50%; animation:transspin .7s linear infinite; pointer-events:none;
+    z-index:3; }
+  @keyframes transspin { to { transform:rotate(360deg); } }
   .prog .t { font-size:11px; color:var(--muted); margin-bottom:2px; }
   .prog .tt { font-size:14px; font-weight:600; white-space:nowrap; overflow:hidden;
     text-overflow:ellipsis; }
@@ -538,13 +543,20 @@ async function translateVisible() {
     if (+el.dataset._gen === transGen) continue;
     const t = el.dataset.tt || '', d = el.dataset.desc || '';
     tasks.push(async () => {
-      const [nt, nd] = await Promise.all([translateText(t, state.lang), translateText(d, state.lang)]);
-      if (nt && nt !== t) {
-        el.dataset.tt = nt;
-        const ttEl = el.querySelector('.tt'); if (ttEl) ttEl.textContent = nt;
+      const spin = document.createElement('div');
+      spin.className = 'trans-spin';
+      el.appendChild(spin);
+      try {
+        const [nt, nd] = await Promise.all([translateText(t, state.lang), translateText(d, state.lang)]);
+        if (nt && nt !== t) {
+          el.dataset.tt = nt;
+          const ttEl = el.querySelector('.tt'); if (ttEl) ttEl.textContent = nt;
+        }
+        if (nd && nd !== d) el.dataset.desc = nd;
+        el.dataset._gen = transGen;
+      } finally {
+        spin.remove();
       }
-      if (nd && nd !== d) el.dataset.desc = nd;
-      el.dataset._gen = transGen;
     });
   }
   if (tasks.length) await runPool(tasks, 4);
