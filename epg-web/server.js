@@ -566,6 +566,21 @@ let mp4Child = null;
 let mp4File = null;
 let mp4Slug = null;
 let mp4BufferMs = 30000;
+
+// Shared bitrate estimate (bytes/sec) of the relay output, used to size the
+// pre-roll and buffer windows in wall-clock terms.
+const brEstimator = { bytes: 0, t0: 0, bps: 0 };
+function brReset() { brEstimator.bytes = 0; brEstimator.t0 = 0; brEstimator.bps = 0; }
+function brSample(size) {
+  const now = Date.now();
+  if (!brEstimator.t0) { brEstimator.t0 = now; brEstimator.bytes = size; return; }
+  const dt = (now - brEstimator.t0) / 1000;
+  if (dt >= 1) {
+    brEstimator.bps = Math.max(50000, (size - brEstimator.bytes) / dt);
+    brEstimator.t0 = now; brEstimator.bytes = size;
+  }
+}
+function brBps() { return brEstimator.bps || 400000; }
 function stopMp4Relay() {
   if (mp4Child) { try { mp4Child.kill(); } catch (_) {} mp4Child = null; }
   if (mp4File) { try { fs.rmSync(mp4File, { force: true }); } catch (_) {} mp4File = null; }
@@ -581,6 +596,8 @@ function startMp4Relay(url, opts) {
     const file = path.join(dir, 'live.mp4');
     const tStart = Date.now();
     const bufferMs = opts && opts.bufferMs ? Math.min(90000, Math.max(5000, +opts.bufferMs)) : 30000;
+    const preRollSec = 10;   // buffer this much before starting playback
+    brReset();
     const args = [
       '-hide_banner', '-loglevel', 'error', '-nostdin',
       '-user_agent', DEFAULT_UA,
@@ -612,46 +629,83 @@ function startMp4Relay(url, opts) {
     const t0 = Date.now();
     const wait = setInterval(() => {
       const elapsed = Date.now() - tStart;
-      const ready = fs.existsSync(file) && fs.statSync(file).size >= 262144; // init + some fragments -> fast start
+      let sz = 0; try { sz = fs.statSync(file).size; } catch (_) {}
+      brSample(sz);
+      const preRollBytes = brBps() * preRollSec;
+      const ready = sz >= Math.max(262144, Math.min(preRollBytes, brBps() * 60));
       if (ready) { clearInterval(wait); done(); }
       else if (elapsed > 60000) { clearInterval(wait); fail('MP4 relay timed out: ' + errLines.join(' ').slice(-200)); }
     }, 300);
   });
 }
-// Stream a growing file to res. Starts at the live edge (fast start), then
-// gradually lags behind by up to `bufferMs` so the client accumulates a
-// buffer while playing, covering short upstream blips.
-function streamGrowingFile(res, file, bufferMs) {
-  const rampMs = 15000;                       // time to reach full buffer
-  const target = Math.max(2000, bufferMs || 10000);
+// Stream a growing file to res.
+// - Pre-roll: never release data younger than ~preRollSec so playback starts
+//   with that cushion already buffered.
+// - Ramp: over the first ~10s of playback, hold increasingly more so the
+//   client builds toward targetSec of buffer.
+// - Network-adaptive: the target buffer is downgraded if delivery throughput
+//   is low, so a weak link doesn't chase an unreachable buffer.
+function streamGrowingFile(res, file, opts) {
+  const o = opts || {};
+  const preRollSec = Math.max(2, o.preRollSec || 10);
+  const targetSec = Math.max(4, o.targetSec || 30);
+  const rampMs = 10000;                 // build full buffer over ~10s of playback
   const startTs = Date.now();
-  const samples = [];                          // [{size, t}] received watermark log
+  const samples = [];                    // [{size, t}] received watermarks
   let sentUpTo = 0;
+  let outBytes = 0, outT0 = 0, outBps = 0;
   res.writeHead(200, { 'Content-Type': 'video/mp4', 'Transfer-Encoding': 'chunked', 'Cache-Control': 'no-store' });
-  const currentAge = () => {
+
+  const recvBytes = () => samples.length ? samples[samples.length - 1].size : 0;
+  const bps = () => brBps();
+
+  // Effective delivery throughput to the client (network speed detector).
+  const noteOut = n => {
+    outBytes += n;
+    const now = Date.now();
+    if (!outT0) outT0 = now;
+    const dt = (now - outT0) / 1000;
+    if (dt >= 2) { outBps = outBytes / dt; outT0 = now; outBytes = 0; }
+  };
+  const networkCapSec = () => {
+    if (!outBps) return targetSec;
+    const m = outBps / 125000; // bytes/s -> Mbps
+    if (m >= 8) return 30;
+    if (m >= 5) return 24;
+    if (m >= 3.2) return 18;
+    if (m >= 1.8) return 12;
+    return 8;
+  };
+
+  // Current hold-back (seconds) = preRoll, ramping to adaptive target.
+  const holdSec = () => {
     const el = Date.now() - startTs;
-    return Math.min(target, el * (target / rampMs));
+    const target = Math.min(targetSec, networkCapSec());
+    const t = Math.min(target, preRollSec + (target - preRollSec) * (el / rampMs));
+    return Math.max(preRollSec * 0.5, t);
   };
-  // largest received offset that is 'old enough' to release now
+
+  // Bytes we may release now (recent media is withheld to build the buffer).
   const releaseOffset = () => {
-    const cutoff = Date.now() - currentAge();
-    let off = 0;
-    for (const s of samples) { if (s.t <= cutoff) off = s.size; else break; }
-    return off;
+    const recv = recvBytes();
+    const holdBytes = bps() * holdSec();
+    return Math.max(0, recv - holdBytes);
   };
+
   const pump = () => {
     if (res.writableEnded) return;
     try {
       const size = fs.statSync(file).size;
       if (size > (samples.length ? samples[samples.length - 1].size : 0)) samples.push({ size, t: Date.now() });
-      const off = releaseOffset();
-      if (off > sentUpTo) {
+      const target = releaseOffset();
+      if (target > sentUpTo) {
         const fd = fs.openSync(file, 'r');
-        const buf = Buffer.alloc(off - sentUpTo);
+        const buf = Buffer.alloc(target - sentUpTo);
         fs.readSync(fd, buf, 0, buf.length, sentUpTo);
         fs.closeSync(fd);
-        sentUpTo = off;
+        sentUpTo = target;
         res.write(buf);
+        noteOut(buf.length);
       }
     } catch (_) {}
   };
@@ -1141,7 +1195,7 @@ const server = http.createServer(async (req, res) => {
       const rel = p.slice('/relaymp4/'.length);
       const abs = path.join(RELAY_DIR, path.normalize(rel));
       if (!abs.startsWith(RELAY_DIR + path.sep) || !fs.existsSync(abs)) return sendJSON(res, 404, { error: 'not found' });
-      streamGrowingFile(res, abs, mp4BufferMs);
+      streamGrowingFile(res, abs, { preRollSec: 10, targetSec: mp4BufferMs / 1000 });
       return;
     }
 
