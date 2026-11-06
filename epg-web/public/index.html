@@ -429,6 +429,10 @@
         <input type="checkbox" id="relayMode"> Use FFmpeg relay (fixes streams that drop, e.g. Pluto)
       </label>
     </div>
+    <div class="p-row">
+      <span class="p-lbl">Web player buffer (seconds) — larger rides out longer blips</span>
+      <input type="number" id="webBuffer" min="5" max="90" step="5" style="width:100%;padding:7px 10px;border-radius:8px;border:1px solid var(--border);background:var(--panel2);color:var(--text);font-size:13px">
+    </div>
 
     <div class="p-divider">______________</div>
     <div class="p-section">Display</div>
@@ -481,7 +485,7 @@
 <script>
 const $ = id => document.getElementById(id);
 const stage = $('stage');
-const state = { channels: [], groups: [], now: Date.now(), fav: new Set(), current: null, dfmt: 'DMY', sel: null, view: [], lang: 'en', translate: false, fullscreen: false, netCache: 3000, relay: false, player: 'vlc' };
+const state = { channels: [], groups: [], now: Date.now(), fav: new Set(), current: null, dfmt: 'DMY', sel: null, view: [], lang: 'en', translate: false, fullscreen: false, netCache: 3000, relay: false, player: 'vlc', webBuffer: 30 };
 let timer = null, toastTimer = null, activeLoadId = 0;
 const LS_SOURCES = 'vlcEpgSources';
 const LS_FAV = 'vlcEpgFavorites';
@@ -816,6 +820,7 @@ function openSettings() {
   $('tvMode').checked = document.body.classList.contains('tv');
   $('fsMode').checked = state.fullscreen;
   $('netCache').value = state.netCache;
+  $('webBuffer').value = state.webBuffer;
   $('relayMode').checked = state.relay;
   $('playerSel').value = state.player;
   updatePlayerSeg();
@@ -840,6 +845,14 @@ $('netCache').addEventListener('change', e => {
   e.target.value = v;
   storageSet(LS_NETCACHE, String(v));
   toast('Network cache: ' + v + ' ms');
+});
+$('webBuffer').addEventListener('change', e => {
+  let v = parseInt(e.target.value, 10);
+  if (!v || v < 5) v = 5;
+  if (v > 90) v = 90;
+  state.webBuffer = v;
+  e.target.value = v;
+  toast('Web player buffer: ' + v + ' s');
 });
 $('relayMode').addEventListener('change', e => {
   state.relay = e.target.checked;
@@ -1247,7 +1260,7 @@ async function playWeb(ch) {
 // Start the native MP4 relay and attach the video + auto-reconnect monitor.
 async function startMp4(ch, quiet) {
   const vid = $('wpVideo');
-  const r4 = await post('/streammp4', { url: ch.url });
+  const r4 = await post('/streammp4', { url: ch.url, buffer: state.webBuffer });
   vid.preload = 'auto';
   vid.src = r4.url;
   let metaDone = false;
@@ -1276,11 +1289,11 @@ function monitorStall(ch, vid) {
     const playing = !vid.paused && vid.readyState >= 2;
     if (playing) {
       if (vid.currentTime !== last) { last = vid.currentTime; lastAt = now; }
-      else if (now - lastAt > 12000) {
+      else if (now - lastAt > 20000) {
         if (vid._reconnects >= 3) { toast('Stream stalled repeatedly — check your connection. Use VLC if it continues.', true); clearInterval(vid._stall); return; }
         vid._reconnects++;
         lastAt = now;
-        toast('Network blip — reconnecting…');
+        if (vid._reconnects === 1) toast('Network blip — reconnecting (buffered playback will cover it)…');
         post('/stop', {}).catch(() => {});
         startMp4(ch, true).catch(() => {});
       }
