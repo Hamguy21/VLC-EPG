@@ -461,7 +461,7 @@ async function plutoFreshUrl(masterUrl, force) {
     if (!m) return null;
     const ch = m[1];
     const cached = plutoZen.get(ch);
-    if (!force && cached && Date.now() - cached.at < 60 * 1000) return cached.url;
+    if (!force && cached && Date.now() - cached.at < 15 * 1000) return cached.url;
     const cid = crypto.randomUUID();
     const qs = new URLSearchParams({
       appName: 'web', appVersion: '9.1.0', deviceVersion: '133.0.0',

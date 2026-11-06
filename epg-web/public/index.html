@@ -1406,7 +1406,18 @@ async function startMp4(ch, quiet, tc) {
     }, 10000);
   }
   vid.onloadedmetadata = () => { metaDone = true; dbgLog('loadedmetadata', { w: vid.videoWidth, h: vid.videoHeight }); vid.play().catch(() => {}); };
-  vid.addEventListener('playing', () => { showLoader(false); dbgLog('playing', { t: vid.currentTime }); }, { once: true });
+  vid.addEventListener('playing', () => {
+    showLoader(false);
+    dbgLog('playing', { t: vid.currentTime });
+    // On a reconnect (quiet restart), the new relay starts at 0 — seek to the
+    // live edge so we don't replay the segment tail we already watched.
+    if (quiet && vid.buffered && vid.buffered.length) {
+      try {
+        const live = Math.max(0, vid.buffered.end(vid.buffered.length - 1) - 2);
+        if (live > 1) { vid.currentTime = live; dbgLog('live_seek', { to: live }); }
+      } catch (_) {}
+    }
+  }, { once: true });
   vid.addEventListener('waiting', () => dbgLog('waiting', { t: vid.currentTime }), { once: false });
   vid.onerror = () => { dbgLog('videofail', { code: vid.error && vid.error.code });
     if (vid.error && vid.error.code === 4) {
@@ -1448,7 +1459,7 @@ function monitorStall(ch, vid) {
     if (playing) {
       if (vid.currentTime !== last) { last = vid.currentTime; lastAt = now; }
       else if (now - lastAt > 12000) {
-        if (vid._reconnects >= 3) { toast('Stream stalled repeatedly — check your connection. Use VLC if it continues.', true); clearInterval(vid._stall); return; }
+        if (vid._reconnects >= 10) { toast('Stream stalled repeatedly — check your connection. Use VLC if it continues.', true); clearInterval(vid._stall); return; }
         // Is the feed actually over (clean EOF) rather than a blip?
         const ended = await checkFeedEnded(ch, vid);
         if (ended) {
