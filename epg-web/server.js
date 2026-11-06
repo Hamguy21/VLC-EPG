@@ -420,7 +420,7 @@ function matchChannels(channels, guide) {
 /* VLC playback                                                        */
 /* ------------------------------------------------------------------ */
 let vlcChild = null;
-function playStream(url, name) {
+function playStream(url, name, opts) {
   if (typeof url !== 'string' || url.length > 8192 || /[\u0000-\u001f\u007f]/.test(url) || url.startsWith('-')) {
     return Promise.reject(Object.assign(new Error('invalid stream URL'), { status: 400 }));
   }
@@ -433,7 +433,8 @@ function playStream(url, name) {
   if (typeof name === 'string') name = name.replace(/[\u0000-\u001f\u007f]/g, '').slice(0, 180);
   return new Promise((resolve, reject) => {
     if (vlcChild) { try { vlcChild.kill(); } catch (_) {} vlcChild = null; }
-    const args = ['--fullscreen'];
+    const args = ['--no-video-title-show'];
+    if (opts && opts.fullscreen) args.push('--fullscreen');
     if (name) args.push('--meta-title=' + name);
     args.push(url);
     let child;
@@ -832,9 +833,9 @@ const server = http.createServer(async (req, res) => {
     if (p === '/play' && req.method === 'POST') {
       if (req.headers['content-type']?.split(';')[0].trim() !== 'application/json')
         throw Object.assign(new Error('content-type must be application/json'), { status: 415 });
-      const { url, name } = parseJSON(await readBody(req));
+      const { url, name, fullscreen } = parseJSON(await readBody(req));
       if (typeof url !== 'string' || !url.trim()) throw Object.assign(new Error('url is required'), { status: 400 });
-      const r = await playStream(url, name);
+      const r = await playStream(url, name, { fullscreen: !!fullscreen });
       return sendJSON(res, 200, r);
     }
 
