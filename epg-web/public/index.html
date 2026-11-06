@@ -1267,27 +1267,37 @@ function setPlayer(p) {
   const sel = $('playerSel'); if (sel) sel.value = state.player;
 }
 
-// Simple download speed test against /speedtest (8MB), then suggest a buffer.
+// Speed test: latency (ping RTT), download (8MB), upload (4MB).
 async function runSpeedTest() {
   const out = $('speedResult');
   out.textContent = 'Testing…';
   try {
-    const t0 = Date.now();
+    // latency: best of 5 round-trips
+    let lat = Infinity;
+    for (let i = 0; i < 5; i++) {
+      const s = performance.now();
+      await fetch('/ping', { cache: 'no-store' });
+      const rtt = performance.now() - s;
+      if (rtt < lat) lat = rtt;
+    }
+    // download
+    const tD0 = performance.now();
     const resp = await fetch('/speedtest', { cache: 'no-store' });
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     const buf = await resp.arrayBuffer();
-    const secs = (Date.now() - t0) / 1000;
-    const mb = buf.byteLength / (1024 * 1024);
-    const mbps = mb / secs;
-    const m = mbps * 8; // Mbps
-    window._lastMbps = m;
-    let tier, rec;
-    if (m >= 8) { tier = '30s'; rec = 'great for 1080p/4K'; }
-    else if (m >= 5) { tier = '24s'; rec = 'fine for 1080p'; }
-    else if (m >= 3.2) { tier = '18s'; rec = 'ok for 720p'; }
-    else if (m >= 1.8) { tier = '12s'; rec = 'SD only'; }
-    else { tier = '8s'; rec = 'low bandwidth — SD'; }
-    out.innerHTML = (m >= 10 ? m.toFixed(0) : m.toFixed(1)) + ' Mbps (download) · latency/packet-loss affect real quality · recommended buffer ~ ' + tier + ' (' + rec + ')';
+    const dSec = (performance.now() - tD0) / 1000;
+    const down = (buf.byteLength / (1024 * 1024)) / dSec * 8;
+    // upload
+    const uBytes = 4 * 1024 * 1024;
+    const tU0 = performance.now();
+    const ur = await fetch('/uploadtest', { method: 'POST', body: new Uint8Array(uBytes) });
+    if (!ur.ok) throw new Error('upload HTTP ' + ur.status);
+    await ur.json();
+    const uSec = (performance.now() - tU0) / 1000;
+    const up = (uBytes / (1024 * 1024)) / uSec * 8;
+    window._lastMbps = down;
+    const f = m => m >= 10 ? m.toFixed(0) : m.toFixed(1);
+    out.innerHTML = `<span style="color:var(--text)"><b>${f(down)}</b> Mbps ↓ download</span> · <b>${f(up)}</b> Mbps ↑ upload · <b>${lat.toFixed(0)}</b> ms latency · latency/packet-loss degrade real quality`;
     toast('Speed test done');
   } catch (e) {
     out.textContent = 'Speed test failed: ' + e.message;
