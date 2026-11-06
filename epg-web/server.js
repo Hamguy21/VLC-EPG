@@ -461,22 +461,24 @@ async function plutoFreshUrl(masterUrl) {
     if (!m) return null;
     const ch = m[1];
     const cached = plutoZen.get(ch);
-    if (cached && Date.now() - cached.at < 5 * 60 * 1000) return cached.url;
+    if (cached && Date.now() - cached.at < 60 * 1000) return cached.url;
     const cid = crypto.randomUUID();
     const qs = new URLSearchParams({
-      appName: 'web', appVersion: '8.1.0', deviceVersion: '133.0.0',
+      appName: 'web', appVersion: '9.1.0', deviceVersion: '133.0.0',
       deviceModel: 'web', deviceMake: 'chrome', deviceType: 'web',
-      ClientModelNumber: '1.0.0', clientID: cid
+      ClientModelNumber: '1.0.0', clientID: cid, serverSideAds: 'false'
     });
     const r = await fetch('https://boot.pluto.tv/v4/start?' + qs.toString(), { headers: { 'User-Agent': DEFAULT_UA } });
     if (!r.ok) throw new Error('boot HTTP ' + r.status);
     const j = await r.json();
+    // Keep the known-good playout path (api/tn/video/playout/...) and shape;
+    // only the token/session/params come from the fresh boot.
     const sp = String(j.stitcherParams || '').replace(/^\?/, '');
-    const extra = '&jwt=' + encodeURIComponent(j.sessionToken) +
+    const fresh = 'https://ipv4.pluto.tv/api/tn/video/playout/v2/stitch/hls/channel/' + ch + '/master.m3u8?' + sp +
+      '&jwt=' + encodeURIComponent(j.sessionToken) +
       '&quality=720p&deviceMake=chrome&deviceType=web&deviceModel=web&deviceVersion=133.0.0&architecture=x86_64&buildVersion=1.0.0&includeExtendedEvents=true&masterJWTPassthrough=true';
-    const fresh = 'https://ipv4.pluto.tv/api/tn/video/playout/v2/stitch/hls/channel/' + ch + '/master.m3u8?' + sp + extra;
     plutoZen.set(ch, { url: fresh, at: Date.now() });
-    sev('pluto_refresh', { channel: ch, len: fresh.length });
+    sev('pluto_refresh', { channel: ch, host: 'ipv4.pluto.tv', len: fresh.length });
     return fresh;
   } catch (e) {
     sev('pluto_refresh_error', { msg: e.message });
