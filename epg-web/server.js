@@ -570,7 +570,7 @@ function stopMp4Relay() {
   if (mp4File) { try { fs.rmSync(mp4File, { force: true }); } catch (_) {} mp4File = null; }
   mp4Slug = null;
 }
-function startMp4Relay(url) {
+function startMp4Relay(url, opts) {
   return new Promise((resolve, reject) => {
     if (!FFMPEG) return reject(new Error('FFmpeg is not available on this system'));
     stopMp4Relay();
@@ -578,6 +578,8 @@ function startMp4Relay(url) {
     const dir = path.join(RELAY_DIR, slug);
     fs.mkdirSync(dir, { recursive: true });
     const file = path.join(dir, 'live.mp4');
+    const tStart = Date.now();
+    const bufferMs = opts && opts.bufferMs ? Math.min(90000, Math.max(5000, +opts.bufferMs)) : 30000;
     const args = [
       '-hide_banner', '-loglevel', 'error', '-nostdin',
       '-user_agent', DEFAULT_UA,
@@ -608,9 +610,11 @@ function startMp4Relay(url) {
     });
     const t0 = Date.now();
     const wait = setInterval(() => {
-      if (fs.existsSync(file) && fs.statSync(file).size >= 131072) { clearInterval(wait); done(); } // >=128KB = init + fragments
-      else if (Date.now() - t0 > 25000) { clearInterval(wait); fail('MP4 relay timed out: ' + errLines.join(' ').slice(-200)); }
-    }, 300);
+      const elapsed = Date.now() - tStart;
+      const ready = fs.existsSync(file) && fs.statSync(file).size >= 131072 && elapsed >= bufferMs;
+      if (ready) { clearInterval(wait); done(); }   // buffered window + init/fragments exist
+      else if (elapsed > 120000) { clearInterval(wait); fail('MP4 relay timed out: ' + errLines.join(' ').slice(-200)); }
+    }, 500);
   });
 }
 // Stream a growing file to res (progressive, chunked, no content-length).
@@ -1031,9 +1035,9 @@ const server = http.createServer(async (req, res) => {
     if (p === '/streammp4' && req.method === 'POST') {
       if (req.headers['content-type']?.split(';')[0].trim() !== 'application/json')
         throw Object.assign(new Error('content-type must be application/json'), { status: 415 });
-      const { url } = parseJSON(await readBody(req));
+      const { url, buffer } = parseJSON(await readBody(req));
       if (typeof url !== 'string' || !url.trim()) throw Object.assign(new Error('url is required'), { status: 400 });
-      const r = await startMp4Relay(url);
+      const r = await startMp4Relay(url, { bufferMs: (Number(buffer) || 30) * 1000 });
       return sendJSON(res, 200, r);
     }
 
