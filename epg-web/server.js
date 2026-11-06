@@ -507,19 +507,36 @@ function startRelay(url) {
     try { child = spawn(FFMPEG, args, { detached: false }); }
     catch (e) { return reject(new Error('failed to start FFmpeg: ' + e.message)); }
     relayChild = child; relayDir = dir;
-    child.on('error', e => { if (relayChild === child) relayChild = null; reject(new Error('FFmpeg failed: ' + e.message)); });
-    child.on('exit', () => { if (relayChild === child) { relayChild = null; relayDir = null; } });
+    const errLines = [];
+    child.stdout.on('data', () => {});
+    child.stderr.on('data', d => { const s = String(d); errLines.push(s); if (errLines.length > 40) errLines.shift(); });
+    let wait = null;
+    let settled = false;
+    const fail = msg => {
+      if (settled) return; settled = true;
+      if (wait) clearInterval(wait);
+      stopRelay();
+      const er = new Error(msg); er.status = 422; reject(er);
+    };
+    const done = () => {
+      if (settled) return; settled = true;
+      if (wait) clearInterval(wait);
+      resolve({ playUrl: `http://127.0.0.1:${PORT}/relay/${slug}/index.m3u8`, relay: true, slug });
+    };
+    child.on('error', e => fail('FFmpeg failed: ' + e.message));
+    child.on('exit', code => {
+      if (relayChild === child) { relayChild = null; relayDir = null; }
+      const lastErr = (errLines[errLines.length - 1] || '').slice(0, 200);
+      setTimeout(() => { if (!fs.existsSync(playlist)) fail('FFmpeg exited (code ' + code + ') ' + lastErr); }, 60);
+    });
     const t0 = Date.now();
-    const wait = setInterval(() => {
-      if (fs.existsSync(playlist)) {
-        clearInterval(wait);
-        resolve({ playUrl: `http://127.0.0.1:${PORT}/relay/${slug}/index.m3u8`, relay: true, slug });
-      } else if (Date.now() - t0 > 20000) {
-        clearInterval(wait);
-        stopRelay();
-        reject(new Error('FFmpeg relay timed out starting'));
+    wait = setInterval(() => {
+      if (fs.existsSync(playlist)) return done();
+      if (Date.now() - t0 > 15000) {
+        const lastErr = (errLines[errLines.length - 1] || '').slice(0, 200);
+        fail('FFmpeg relay timed out: ' + lastErr);
       }
-    }, 400);
+    }, 300);
   });
 }
 function playRelay(url, opts) {
@@ -965,6 +982,22 @@ const server = http.createServer(async (req, res) => {
         ? gdata[0].map(seg => (seg && seg[0]) || '').join('')
         : text;
       return sendJSON(res, 200, { text: gout, from: (gdata && gdata[2]) || 'auto' });
+    }
+
+    // Serve bundled vendor assets (e.g. hls.min.js) from public/vendor.
+    if (p.startsWith('/vendor/')) {
+      const abs = path.join(PUBLIC_DIR, path.normalize(p.slice(1)));
+      if (!abs.startsWith(PUBLIC_DIR + path.sep)) return sendJSON(res, 403, { error: 'forbidden' });
+      fs.readFile(abs, (err, buf) => {
+        if (err) return sendJSON(res, 404, { error: 'not found' });
+        res.writeHead(200, {
+          'Content-Type': abs.endsWith('.js') ? 'application/javascript' : 'application/octet-stream',
+          'Content-Length': buf.length,
+          'Cache-Control': 'max-age=86400',
+        });
+        res.end(buf);
+      });
+      return;
     }
 
     // Serve local HLS segments produced by the FFmpeg relay.
