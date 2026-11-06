@@ -1351,6 +1351,7 @@ async function playWeb(ch) {
   if (hlsPlayer) { try { hlsPlayer.destroy(); } catch (_) {} hlsPlayer = null; }
   vid.pause(); vid.removeAttribute('src'); vid.load();
   vid._reconnects = 0;
+  vid._triedTc = false;
   try {
     await startMp4(ch);
   } catch (e) {
@@ -1370,11 +1371,11 @@ function dbgLog(k, o) {
 }
 
 // Start the native MP4 relay and attach the video + auto-reconnect monitor.
-async function startMp4(ch, quiet) {
+async function startMp4(ch, quiet, tc) {
   const vid = $('wpVideo');
-  const r4 = await post('/streammp4', { url: ch.url, buffer: state.webBuffer });
+  const r4 = await post('/streammp4', { url: ch.url, buffer: state.webBuffer, tc: !!tc });
   if (r4.codecs) window._codecs = r4.codecs;
-  dbgLog('mp4_relay', { codecs: r4.codecs || null, buffer: state.webBuffer });
+  dbgLog(tc ? 'mp4_relay_tc' : 'mp4_relay', { codecs: r4.codecs || null, buffer: state.webBuffer, tc: !!tc });
   vid._checkedEnded = false; vid._stopStall = false;
   vid.preload = 'auto';
   vid.src = r4.url;
@@ -1389,7 +1390,18 @@ async function startMp4(ch, quiet) {
   vid.addEventListener('playing', () => { showLoader(false); dbgLog('playing', { t: vid.currentTime }); }, { once: true });
   vid.addEventListener('waiting', () => dbgLog('waiting', { t: vid.currentTime }), { once: false });
   vid.onerror = () => { dbgLog('videofail', { code: vid.error && vid.error.code });
-    if (vid.error && vid.error.code === 4) { vid.onerror = null; startHlsPlay(ch).catch(() => {}); }
+    if (vid.error && vid.error.code === 4) {
+      vid.onerror = null;
+      if (!vid._triedTc) {
+        vid._triedTc = true;
+        dbgLog('auto_codec_switch', {});
+        toast('Auto-switching to transcoded video for compatibility…');
+        post('/stop', {}).catch(() => {});
+        startMp4(ch, true, true).catch(() => startHlsPlay(ch).catch(() => {}));
+      } else {
+        startHlsPlay(ch).catch(() => {});
+      }
+    }
   };
   vid.play().catch(() => {});
   state.current = { url: ch.url, name: ch.name };
