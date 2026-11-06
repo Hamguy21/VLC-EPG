@@ -2,7 +2,9 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b0e14">
+<meta name="description" content="A local IPTV electronic program guide for M3U playlists, XMLTV schedules, and VLC playback.">
 <title>VLC EPG — TV Guide</title>
 <style>
   :root {
@@ -214,6 +216,78 @@
   .panel .fmt-opt.sel { border-color:var(--accent); background:rgba(86,115,245,.12); }
   .panel .fmt-opt input { accent-color:var(--accent); }
   .panel .p-actions { display:flex; gap:8px; margin-top:16px; justify-content:flex-end; }
+
+  /* Production polish */
+  :root {
+    color-scheme: dark;
+    --bg:#0b0e14; --panel:#121824; --panel2:#182131; --border:#273348;
+    --text:#edf2fb; --muted:#9aa8bc; --accent:#6d86ff; --accent2:#91a3ff;
+    --now:#ff6578; --grid:#202b3d; --star:#ffd166;
+  }
+  body { -webkit-font-smoothing:antialiased; }
+  button, input, select { font:inherit; }
+  button:focus-visible, input:focus-visible, select:focus-visible, .prog:focus-visible {
+    outline:2px solid var(--accent2); outline-offset:2px;
+  }
+  .top { gap:9px 12px; padding:12px 16px; }
+  .top h1 { min-width:120px; }
+  .top .field { min-width:180px; }
+  .top .field input { width:min(28vw,340px); min-width:190px; }
+  .top #saved { min-width:190px; max-width:240px; height:66px; }
+  .top .status { flex:1 1 240px; min-width:180px; text-align:right; }
+  .btn { min-height:34px; transition:background .15s ease, border-color .15s ease, transform .15s ease; }
+  .btn:active { transform:translateY(1px); }
+  .btn:disabled { opacity:.55; cursor:not-allowed; }
+  .bar { min-height:44px; gap:8px 10px; }
+  .bar select, .bar input { min-height:30px; }
+  .row .ch { box-shadow:8px 0 12px rgba(0,0,0,.12); }
+  .row .ch img { flex:0 0 30px; }
+  .row .ch .star { min-width:30px; min-height:34px; border-radius:6px; }
+  .row .ch .star:hover { background:rgba(255,209,102,.10); }
+  .prog { min-width:0; }
+  .prog:focus-visible { z-index:7; }
+  .prog.noinfo { pointer-events:none; }
+  .placeholder { min-height:280px; height:100%; text-align:center; padding:24px; }
+  .placeholder .big { font-size:34px; }
+  .loading { position:sticky; top:0; min-height:100%; }
+  .details { padding-bottom:max(16px, env(safe-area-inset-bottom)); }
+  .details .d-icon img { width:auto; max-width:min(100%,420px); }
+  .details .d-close { min-width:36px; min-height:36px; }
+  .toast { max-width:min(90vw,640px); text-align:center; }
+  .nowbar .nb-prog { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .nowbar .nb-time { white-space:nowrap; }
+  @media (max-width:900px) {
+    html,body { overflow:hidden; }
+    .top { padding:10px; }
+    .top h1 { flex:1 1 100%; }
+    .top .field { flex:1 1 240px; }
+    .top .field input { width:100%; }
+    .top #saved { flex:1 1 100%; max-width:none; height:74px; }
+    .top .status { text-align:left; margin-left:0; }
+    .bar { padding:8px 10px; }
+    .bar .hint { flex:1 1 100%; margin-left:0; }
+    .details { max-height:58vh; padding:12px 14px; }
+  }
+  @media (max-width:560px) {
+    .top { gap:7px; }
+    .top .field { flex-basis:100%; }
+    .top .btn { flex:1 1 auto; }
+    .bar { gap:6px; }
+    .bar .grp { display:none; }
+    .bar select, .bar input[type=text] { flex:1 1 42%; width:auto; min-width:0; }
+    .jumpwrap { flex:1 1 100%; }
+    .jumpwrap input { width:100%; }
+    .nowbar { gap:7px; padding:7px 10px; }
+    .nowbar .nb-time { display:none; }
+    .details .d-body { gap:10px; }
+    .details .d-main, .details .d-side { min-width:100%; }
+    .row .ch { width:200px; }
+    .ruler .tick { font-size:9px; }
+  }
+  @media (prefers-reduced-motion:reduce) {
+    *, *::before, *::after { animation-duration:.01ms !important; animation-iteration-count:1 !important; transition-duration:.01ms !important; scroll-behavior:auto !important; }
+  }
+
 </style>
 </head>
 <body>
@@ -228,13 +302,13 @@
     <button class="btn ghost" id="sample">Sample</button>
     <button class="btn ghost" id="grab" title="Auto-fetch matching EPG guides for these channels">⚡ Auto EPG</button>
     <button class="btn ghost" id="saveSrc" title="Save the current playlist/EPG as a named source">+ Save</button>
-    <button class="btn ghost" id="settingsBtn" title="Settings">⚙</button>
+    <button class="btn ghost" id="settingsBtn" title="Settings" aria-label="Open settings">⚙ Settings</button>
     <div class="field"><label>Saved sources (Ctrl-click to select several)</label>
       <select id="saved" multiple size="6"><option value="">— none —</option></select></div>
     <button class="btn ghost small" id="loadSaved" title="Load selected source">Load</button>
     <button class="btn ghost small" id="delSaved" title="Delete selected source">Delete</button>
     <button class="btn ghost small" id="editSaved" title="Edit selected source name">Rename</button>
-    <div class="status" id="status">Enter a playlist + EPG, or load the sample.</div>
+    <div class="status" id="status" role="status" aria-live="polite">Enter a playlist + EPG, or load the sample.</div>
   </div>
 
   <div class="nowbar" id="nowbar" style="display:none">
@@ -266,13 +340,13 @@
     <span class="hint">click a channel or program to watch · ★ = favorite</span>
   </div>
 
-  <div class="stage" id="stage">
+  <div class="stage" id="stage" tabindex="0" aria-label="Electronic program guide">
     <div class="placeholder"><div class="big">📺</div>
       <div>EPG grid appears here</div></div>
   </div>
 </div>
 
-<div class="details" id="details">
+<div class="details" id="details" role="region" aria-label="Program details" aria-hidden="true">
   <div class="d-head">
     <div class="d-title" id="dTitle"></div>
     <button class="d-close" id="dClose" title="Close">×</button>
@@ -295,9 +369,9 @@
 </div>
 
 <!-- Settings modal -->
-<div class="overlay" id="overlay">
-  <div class="panel">
-    <h2>Settings</h2>
+<div class="overlay" id="overlay" role="presentation">
+  <div class="panel" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+    <h2 id="settingsTitle">Settings</h2>
     <div class="p-sub">Display preferences</div>
     <div class="p-row">
       <span class="p-lbl">Date format</span>
@@ -324,32 +398,55 @@
 const $ = id => document.getElementById(id);
 const stage = $('stage');
 const state = { channels: [], groups: [], now: Date.now(), fav: new Set(), current: null, dfmt: 'DMY', sel: null, view: [] };
-let timer = null;
+let timer = null, toastTimer = null, activeLoadId = 0;
 const LS_SOURCES = 'vlcEpgSources';
 const LS_FAV = 'vlcEpgFavorites';
 const LS_DFMT = 'vlcEpgDateFormat';
 const LS_TV = 'vlcEpgTvMode';
 
-function loadFav() { try { state.fav = new Set(JSON.parse(localStorage.getItem(LS_FAV) || '[]')); } catch (_) {} }
-function saveFav() { localStorage.setItem(LS_FAV, JSON.stringify([...state.fav])); }
-
-function loadDfmt() { try { const v = localStorage.getItem(LS_DFMT); if (v === 'YMD' || v === 'MDY') state.dfmt = v; } catch (_) {} }
-function saveDfmt() { localStorage.setItem(LS_DFMT, state.dfmt); }
-
-function loadTv() { try { if (localStorage.getItem(LS_TV) === '1') document.body.classList.add('tv'); } catch (_) {} }
-function applyTv(on) { document.body.classList.toggle('tv', on); localStorage.setItem(LS_TV, on ? '1' : '0'); }
+function storageGet(key, fallback) {
+  try { const value = localStorage.getItem(key); return value == null ? fallback : value; }
+  catch (_) { return fallback; }
+}
+function storageSet(key, value) {
+  try { localStorage.setItem(key, value); return true; }
+  catch (_) { toast('Browser storage is unavailable or full', true); return false; }
+}
+function loadFav() {
+  try {
+    const value = JSON.parse(storageGet(LS_FAV, '[]'));
+    state.fav = new Set(Array.isArray(value) ? value.filter(v => typeof v === 'string') : []);
+  } catch (_) { state.fav = new Set(); }
+}
+function saveFav() { storageSet(LS_FAV, JSON.stringify([...state.fav])); }
+function loadDfmt() { const v = storageGet(LS_DFMT, 'DMY'); if (['YMD','MDY'].includes(v)) state.dfmt = v; }
+function saveDfmt() { storageSet(LS_DFMT, state.dfmt); }
+function loadTv() { if (storageGet(LS_TV, '0') === '1') document.body.classList.add('tv'); }
+function applyTv(on) { document.body.classList.toggle('tv', on); storageSet(LS_TV, on ? '1' : '0'); }
 
 function toast(msg, isErr) {
-  const t = $('toast'); t.textContent = msg; t.classList.add('show');
+  const t = $('toast'); t.textContent = String(msg); t.classList.add('show');
   t.style.background = isErr ? '#3a2226' : '#222a38';
-  setTimeout(() => t.classList.remove('show'), 3200);
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 3200);
 }
-async function post(path, body) {
-  const r = await fetch(path, { method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify(body || {}) });
-  const j = await r.json();
-  if (!r.ok) throw new Error(j.error || r.status);
-  return j;
+async function post(path, body, options = {}) {
+  const controller = options.signal ? null : new AbortController();
+  const signal = options.signal || controller.signal;
+  const timeout = controller ? setTimeout(() => controller.abort(), 60000) : null;
+  try {
+    const r = await fetch(path, { method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(body || {}), signal, cache:'no-store' });
+    const raw = await r.text();
+    let j;
+    try { j = raw ? JSON.parse(raw) : {}; }
+    catch (_) { throw new Error('Server returned an invalid response (' + r.status + ')'); }
+    if (!r.ok) throw new Error(j.error || ('Request failed (' + r.status + ')'));
+    return j;
+  } catch (e) {
+    if (e.name === 'AbortError') throw new Error('Request timed out or was cancelled');
+    throw e;
+  } finally { if (timeout) clearTimeout(timeout); }
 }
 function setStatus(text, kind) {
   const s = $('status'); s.textContent = text; s.className = 'status ' + (kind || '');
@@ -387,8 +484,13 @@ function nowProgram(ch, at) {
 }
 
 /* ---------- sources (add / load / rename / delete) ---------- */
-function savedSources() { try { return JSON.parse(localStorage.getItem(LS_SOURCES) || '[]'); } catch (_) { return []; } }
-function writeSources(list) { localStorage.setItem(LS_SOURCES, JSON.stringify(list)); }
+function savedSources() {
+  try {
+    const value = JSON.parse(storageGet(LS_SOURCES, '[]'));
+    return Array.isArray(value) ? value.filter(s => s && typeof s.name === 'string' && typeof s.m3u === 'string') : [];
+  } catch (_) { return []; }
+}
+function writeSources(list) { return storageSet(LS_SOURCES, JSON.stringify(list)); }
 function selectedSources() {
   const sel = [...$('saved').selectedOptions].map(o => o.value).filter(Boolean);
   const all = savedSources();
@@ -505,6 +607,9 @@ $('editSaved').addEventListener('click', () => {
   if (!name) return;
   const nn = name.trim();
   if (!nn) return;
+  if (nn !== s.name && savedSources().some(x => x.name === nn)) {
+    toast('A source with that name already exists', true); return;
+  }
   const list = savedSources().filter(x => x.name !== s.name);
   list.push({ name: nn, m3u: s.m3u, xmltv: s.xmltv });
   writeSources(list);
@@ -514,6 +619,7 @@ $('editSaved').addEventListener('click', () => {
 
 /* ---------- loaders ---------- */
 async function loadGuide() {
+  const loadId = ++activeLoadId;
   const m3u = $('m3u').value.trim();
   const xmltv = $('xmltv').value.trim();
   if (!m3u) { toast('Enter an M3U playlist address first', true); return; }
@@ -522,6 +628,7 @@ async function loadGuide() {
   try {
     let guide = xmltv;
     const m = await post('/parse/m3u', { src: m3u });
+    if (loadId !== activeLoadId) return;
     if (!guide && m.headerEpg) { guide = m.headerEpg; $('xmltv').value = guide; }
     if (!guide) {
       state.channels = m.channels.map((c, i) => ({ ...c, _src: i, programs: [], epg: null, matchHow: null }));
@@ -531,6 +638,7 @@ async function loadGuide() {
       return;
     }
     const match = await post('/match', { m3u, xmltv: guide });
+    if (loadId !== activeLoadId) return;
     state.channels = match.channels.map((c, i) => ({ ...c, _src: i }));
     state.groups = match.groups;
     render();
@@ -538,9 +646,11 @@ async function loadGuide() {
     setStatus(match.channels.length + ' channels · ' + match.matched + ' with EPG (' +
       match.stats.id + ' by id, ' + match.stats.name + ' by name). Click any channel to play.');
   } catch (e) {
-    setStatus('Failed: ' + e.message, 'err');
-    toast('Load failed: ' + e.message, true);
-  } finally { showLoading(false); }
+    if (loadId === activeLoadId) {
+      setStatus('Failed: ' + e.message, 'err');
+      toast('Load failed: ' + e.message, true);
+    }
+  } finally { if (loadId === activeLoadId) showLoading(false); }
 }
 
 async function sample() {
@@ -551,12 +661,14 @@ async function sample() {
 
 // Auto-grab: ask the server to find matching EPG guides for the current playlist.
 async function autoGrab() {
+  const loadId = ++activeLoadId;
   const m3u = $('m3u').value.trim();
   if (!m3u) { toast('Enter an M3U playlist first', true); return; }
   setStatus('Auto-grabbing EPG guides… (this may take a few seconds)');
   showLoading(true);
   try {
     const j = await post('/grab', { m3u });
+    if (loadId !== activeLoadId) return;
     state.channels = j.channels.map((c, i) => ({ ...c, _src: i }));
     state.groups = j.groups;
     // The server wrote the matched guide to a local XMLTV file. If a saved
@@ -582,10 +694,12 @@ async function autoGrab() {
     setStatus(j.failures && j.failures.length ? msg + ' · errors: ' + j.failures.join('; ') + saved : msg + saved);
     toast('Auto EPG: ' + msg + saved);
   } catch (e) {
-    setStatus('Auto-grab failed: ' + e.message, 'err');
-    toast('Auto-grab failed: ' + e.message, true);
+    if (loadId === activeLoadId) {
+      setStatus('Auto-grab failed: ' + e.message, 'err');
+      toast('Auto-grab failed: ' + e.message, true);
+    }
   } finally {
-    showLoading(false);
+    if (loadId === activeLoadId) showLoading(false);
   }
 }
 
@@ -617,7 +731,7 @@ function render() {
   const halfHours = parseInt($('window').value, 10);
   // The sticky channel column occupies the left 240px; the timeline starts to
   // its right so programs never render underneath (and are hidden by) it.
-  const CH_W = 240;
+  const CH_W = document.body.classList.contains('tv') ? 300 : 240;
   const minPxPerHour = 240;
   const availTimeline = Math.max(0, stage.clientWidth - CH_W);
   const pxPerHour = Math.max(minPxPerHour, availTimeline / (halfHours * 2));
@@ -633,8 +747,8 @@ function render() {
   if (filterMode === 'fav') channels = channels.filter(c => state.fav.has(favKey(c)));
   if (filterMode === 'epg') channels = channels.filter(c => c.epg);
   if (q) {
-    channels = channels.filter(c => c.name.toLowerCase().includes(q) ||
-      (c.programs || []).some(p => p.title.toLowerCase().includes(q)));
+    channels = channels.filter(c => String(c.name || '').toLowerCase().includes(q) ||
+      (c.programs || []).some(p => String(p.title || '').toLowerCase().includes(q)));
   }
 
   const grp = $('group');
@@ -642,7 +756,13 @@ function render() {
     state.groups.map(g => `<option ${g===selGroup?'selected':''}>${escapeHtml(g)}</option>`).join('');
 
   state.view = channels;
-  if (state.sel != null && state.sel >= channels.length) state.sel = channels.length - 1;
+  if (state.sel != null && state.sel >= channels.length) state.sel = channels.length ? channels.length - 1 : null;
+  if (!channels.length) {
+    stage.innerHTML = '<div class="placeholder"><div class="big">📺</div><div>' +
+      (state.channels.length ? 'No channels match the current filters.' : 'No guide loaded yet.') +
+      '</div><div>Load a playlist or adjust your filters.</div></div>';
+    return;
+  }
 
   let html = buildRuler(halfHours, pxPerHour, now, totalW, CH_W);
   html += '<div class="grid" style="width:' + totalW + 'px">';
@@ -655,7 +775,7 @@ function render() {
 
     html += '<div class="row' + (isPlaying ? ' playing' : '') + (isSel ? ' selected' : '') + '" id="row-' + idx + '" data-src="' + (ch._src != null ? ch._src : idx) + '">';
     html += '<div class="ch">';
-    if (ch.logo) html += `<img src="${escapeHtml(ch.logo)}" loading="lazy" onerror="this.style.display='none'">`;
+    if (ch.logo && /^https?:\/\//i.test(ch.logo)) html += `<img src="${escapeHtml(ch.logo)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.hidden=true">`;
     html += '<div class="cinfo">';
     html += '<div class="name">' + escapeHtml(ch.name) + '</div>';
     if (np) html += `<div class="nowprog"><span class="t">${fmtTime(np.start)}–${fmtTime(np.stop)}</span> ${escapeHtml(np.title)}</div>`;
@@ -663,7 +783,7 @@ function render() {
     else html += '<div class="nowprog" style="color:var(--muted)">no EPG info</div>';
     if (ch.group) html += `<div class="group">${escapeHtml(ch.group)}</div>`;
     html += '</div>';
-    html += `<button class="star ${isFav?'on':''}" data-idx="${idx}" title="Favorite">★</button>`;
+    html += `<button class="star ${isFav?'on':''}" data-idx="${idx}" title="${isFav?'Remove favorite':'Add favorite'}" aria-label="${isFav?'Remove':'Add'} ${escapeHtml(ch.name)} ${isFav?'from':'to'} favorites" aria-pressed="${isFav}">★</button>`;
     html += '</div>'; // ch
 
     const progs = (ch.programs || []).filter(p => p.stop > start && p.start < end);
@@ -673,7 +793,7 @@ function render() {
     }
     for (const p of progs) {
       const left = CH_W + Math.max(0, (p.start - start) / 3600e3) * pxPerHour;
-      const right = Math.min(totalW, CH_W + (p.stop - start) / 3600e3) * pxPerHour;
+      const right = CH_W + Math.min(halfHours * 2, (p.stop - start) / 3600e3) * pxPerHour;
       const w = right - left;
       if (w < 6) continue;
       const isNow = p.start <= now && p.stop > now;
@@ -735,10 +855,15 @@ function render() {
   });
 
   clearInterval(timer);
+  const renderedAt = now;
   timer = setInterval(() => {
     const nl = stage.querySelector('.nowline');
-    if (nl) nl.style.left = ($('window').value * 240) + 'px';
-  }, 60000);
+    if (nl) nl.style.left = (CH_W + (halfHours + (Date.now() - renderedAt) / 3600000) * pxPerHour) + 'px';
+    if (state.current) {
+      const current = state.channels.find(c => c.url === state.current.url);
+      if (current) updateNowBar(current);
+    }
+  }, 30000);
 }
 
 /* ---------- play + details ---------- */
@@ -746,12 +871,16 @@ function playChannel(ch) {
   if (!ch || !ch.url) { toast('No stream URL for this channel', true); return; }
   state.current = { url: ch.url, name: ch.name };
   render();
-  Promise.resolve(post('/play', { url: ch.url }))
+  Promise.resolve(post('/play', { url: ch.url, name: ch.name }))
     .then(() => {
       updateNowBar(ch);
       toast('▶ ' + ch.name);
     })
-    .catch(e => toast('Play failed: ' + e.message, true));
+    .catch(e => {
+      state.current = null;
+      render();
+      toast('Play failed: ' + e.message, true);
+    });
 }
 
 function updateNowBar(ch) {
@@ -765,6 +894,7 @@ function updateNowBar(ch) {
 
 function openDetails() {
   $('details').classList.add('open');
+  $('details').setAttribute('aria-hidden', 'false');
   // Reserve room below the grid (plus a small buffer) so the last rows can
   // scroll fully clear of the drawer.
   const g = stage.querySelector('.grid');
@@ -772,6 +902,7 @@ function openDetails() {
 }
 function closeDetails() {
   $('details').classList.remove('open');
+  $('details').setAttribute('aria-hidden', 'true');
   const g = stage.querySelector('.grid');
   if (g) g.style.marginBottom = '';
 }
@@ -883,6 +1014,15 @@ $('window').addEventListener('change', () => { if (state.channels.length) render
 $('m3u').addEventListener('keydown', e => { if (e.key === 'Enter') loadGuide(); });
 $('xmltv').addEventListener('keydown', e => { if (e.key === 'Enter') loadGuide(); });
 $('dClose').addEventListener('click', closeDetails);
+$('stopPlay').addEventListener('click', async () => {
+  try {
+    await post('/stop', {});
+    state.current = null;
+    $('nowbar').style.display = 'none';
+    render();
+    toast('Playback stopped');
+  } catch (e) { toast('Stop failed: ' + e.message, true); }
+});
 
 // Horizontal wheel-scroll over the timeline (scroll rows left/right).
 stage.addEventListener('wheel', (e) => {
@@ -890,7 +1030,7 @@ stage.addEventListener('wheel', (e) => {
   // program area (right of the sticky channel column).
   if (stage.scrollWidth <= stage.clientWidth) return;
   const r = stage.getBoundingClientRect();
-  if (e.clientX - r.left < 240) return; // over the channel column -> keep vertical
+  if (e.clientX - r.left < (document.body.classList.contains('tv') ? 300 : 240)) return; // over the channel column -> keep vertical
   if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
     e.preventDefault();
     stage.scrollLeft += e.deltaY;
@@ -926,6 +1066,10 @@ function selectAt(idx) {
 }
 function selChannel() { return state.sel != null ? state.view[state.sel] : null; }
 window.addEventListener('keydown', (e) => {
+if (e.key === 'Escape') {
+  if ($('overlay').classList.contains('open')) { closeSettings(); return; }
+  if ($('details').classList.contains('open')) { closeDetails(); return; }
+}
 // ignore when typing in an input/select/textarea
 const t = e.target;
 if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA')) return;
