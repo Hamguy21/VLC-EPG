@@ -476,7 +476,7 @@ function progTitle(p) { return langVariant(p && p.titles, state.lang) || (p && p
 function progDesc(p) { return langVariant(p && p.descs, state.lang) || (p && p.desc) || ''; }
 // Collect languages actually present in the loaded guide.
 function detectLanguages() {
-  const set = new Set([state.lang]);
+  const set = new Set();
   for (const ch of state.channels) for (const p of (ch.programs || [])) {
     for (const t of (p.titles || [])) if (t.lang) set.add(t.lang);
     for (const d of (p.descs || [])) if (d.lang) set.add(d.lang);
@@ -518,46 +518,57 @@ function runPool(tasks, limit) {
   });
   return Promise.all(workers);
 }
-function visibleProgEls() {
+function visibleRows() {
   const st = stage, h = rowHeight(), ruler = rulerHeight();
   const topIdx = Math.max(0, Math.floor((st.scrollTop - ruler) / h));
   const bottomIdx = Math.min(state.view.length - 1, Math.ceil((st.scrollTop + st.clientHeight - ruler) / h));
-  const stRect = st.getBoundingClientRect();
-  const leftBound = stRect.left + (document.body.classList.contains('tv') ? 300 : 240);
-  const rightBound = stRect.right;
-  const out = [];
+  const rows = [];
   for (let i = topIdx; i <= bottomIdx; i++) {
     const row = document.getElementById('row-' + i);
-    if (!row) continue;
-    row.querySelectorAll('.prog:not(.noinfo)').forEach(el => {
-      const r = el.getBoundingClientRect();
-      if (r.right >= leftBound && r.left <= rightBound) out.push(el);
-    });
+    if (row) rows.push(row);
   }
-  return out;
+  return rows;
 }
 async function translateVisible() {
   if (!state.translate) return;
   const tasks = [];
-  for (const el of visibleProgEls()) {
-    if (+el.dataset._gen === transGen) continue;
-    const t = el.dataset.tt || '', d = el.dataset.desc || '';
-    tasks.push(async () => {
-      const spin = document.createElement('div');
-      spin.className = 'trans-spin';
-      el.appendChild(spin);
-      try {
-        const [nt, nd] = await Promise.all([translateText(t, state.lang), translateText(d, state.lang)]);
-        if (nt && nt !== t) {
-          el.dataset.tt = nt;
-          const ttEl = el.querySelector('.tt'); if (ttEl) ttEl.textContent = nt;
-        }
-        if (nd && nd !== d) el.dataset.desc = nd;
-        el.dataset._gen = transGen;
-      } finally {
-        spin.remove();
-      }
+  for (const row of visibleRows()) {
+    // channel column: name + now/next title
+    const nameEl = row.querySelector('.ch .name');
+    const nowTitleEl = row.querySelector('.ch .np-title');
+    // program tiles in this row that are within the horizontal viewport
+    const stRect = stage.getBoundingClientRect();
+    const leftBound = stRect.left + (document.body.classList.contains('tv') ? 300 : 240);
+    const rightBound = stRect.right;
+    const tileEls = [...row.querySelectorAll('.prog:not(.noinfo)')].filter(el => {
+      const r = el.getBoundingClientRect();
+      return r.right >= leftBound && r.left <= rightBound;
     });
+    for (const el of [nameEl, nowTitleEl, ...tileEls]) {
+      if (!el) continue;
+      if (+el.dataset._gen === transGen) continue;
+      const text = el.dataset.tt != null ? el.dataset.tt : el.textContent;
+      if (!text || !text.trim()) { el.dataset._gen = transGen; continue; }
+      const isTile = el.classList.contains('prog');
+      tasks.push(async () => {
+        const spin = isTile ? document.createElement('div') : null;
+        if (spin) { spin.className = 'trans-spin'; el.appendChild(spin); }
+        try {
+          const nt = await translateText(text, state.lang);
+          if (nt && nt !== text) {
+            if (isTile) {
+              el.dataset.tt = nt;
+              const ttEl = el.querySelector('.tt'); if (ttEl) ttEl.textContent = nt;
+            } else {
+              el.textContent = nt;
+            }
+          }
+          el.dataset._gen = transGen;
+        } finally {
+          if (spin) spin.remove();
+        }
+      });
+    }
   }
   if (tasks.length) await runPool(tasks, 4);
 }
@@ -741,6 +752,15 @@ $('retranslate').addEventListener('click', () => {
 $('prefLang').addEventListener('change', e => {
   state.lang = e.target.value;
   storageSet(LS_LANG, state.lang);
+  // If the chosen language isn't already in the guide, automatically enable
+  // translation so text actually changes language.
+  const langs = detectLanguages();
+  if (state.lang !== 'en' && !langs.includes(state.lang)) {
+    state.translate = true;
+    storageSet(LS_TRANS, '1');
+    $('autoTranslate').checked = true;
+    toast('Auto-translate enabled for ' + (LANG_NAMES[state.lang] || state.lang.toUpperCase()));
+  }
   transGen++;
   if (state.channels.length) render();
   toast('Preferred language: ' + (LANG_NAMES[state.lang] || state.lang.toUpperCase()));
@@ -944,7 +964,7 @@ function render() {
     if (ch.logo && /^https?:\/\//i.test(ch.logo)) html += `<img src="${escapeHtml(ch.logo)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.hidden=true">`;
     html += '<div class="cinfo">';
     html += '<div class="name">' + escapeHtml(ch.name) + '</div>';
-    if (np) html += `<div class="nowprog"><span class="t">${fmtTime(np.start)}–${fmtTime(np.stop)}</span> ${escapeHtml(np.title)}</div>`;
+    if (np) html += `<div class="nowprog"><span class="t">${fmtTime(np.start)}–${fmtTime(np.stop)}</span> <span class="np-title">${escapeHtml(np.title)}</span></div>`;
     else if (ch.epg) html += '<div class="nowprog" style="color:var(--muted)">no program at this time</div>';
     else html += '<div class="nowprog" style="color:var(--muted)">no EPG info</div>';
     if (ch.group) html += `<div class="group">${escapeHtml(ch.group)}</div>`;
