@@ -448,6 +448,42 @@ function relayHeaders(url) {
   return h;
 }
 
+// --- Pluto session refresher (prototype) ---
+// Pluto's stitch/HLS playout is bounded per session: the feed ends when its
+// pre-minted JWT session's playlist is exhausted. To keep a channel "live"
+// we mint a fresh guest session from boot.pluto.tv and rebuild the playout
+// URL with the new token + stitcherParams, so each relay/restart uses a new
+// live session instead of replaying the same bounded (.
+const plutoZen = new Map(); // channel -> {url, at}
+async function plutoFreshUrl(masterUrl) {
+  try {
+    const m = String(masterUrl).match(/\/channel\/([^/]+)\/master\.m3u8/i);
+    if (!m) return null;
+    const ch = m[1];
+    const cached = plutoZen.get(ch);
+    if (cached && Date.now() - cached.at < 5 * 60 * 1000) return cached.url;
+    const cid = crypto.randomUUID();
+    const qs = new URLSearchParams({
+      appName: 'web', appVersion: '8.1.0', deviceVersion: '133.0.0',
+      deviceModel: 'web', deviceMake: 'chrome', deviceType: 'web',
+      ClientModelNumber: '1.0.0', clientID: cid
+    });
+    const r = await fetch('https://boot.pluto.tv/v4/start?' + qs.toString(), { headers: { 'User-Agent': DEFAULT_UA } });
+    if (!r.ok) throw new Error('boot HTTP ' + r.status);
+    const j = await r.json();
+    const sp = String(j.stitcherParams || '').replace(/^\?/, '');
+    const extra = '&jwt=' + encodeURIComponent(j.sessionToken) +
+      '&quality=720p&deviceMake=chrome&deviceType=web&deviceModel=web&deviceVersion=133.0.0&architecture=x86_64&buildVersion=1.0.0&includeExtendedEvents=true&masterJWTPassthrough=true';
+    const fresh = 'https://ipv4.pluto.tv/api/tn/video/playout/v2/stitch/hls/channel/' + ch + '/master.m3u8?' + sp + extra;
+    plutoZen.set(ch, { url: fresh, at: Date.now() });
+    sev('pluto_refresh', { channel: ch, len: fresh.length });
+    return fresh;
+  } catch (e) {
+    sev('pluto_refresh_error', { msg: e.message });
+    return null;
+  }
+}
+
 function launchVlc(url, name, fullscreen, hw) {
   return new Promise((resolve, reject) => {
     if (vlcChild) { try { vlcChild.kill(); } catch (_) {} vlcChild = null; }
@@ -496,7 +532,8 @@ function stopRelay() {
 }
 // Start an FFmpeg relay and wait until its HLS playlist exists. Returns the
 // local play URL. Caller decides what plays it (VLC or a web player).
-function startRelay(url) {
+async function startRelay(url) {
+  if (/pluto\.tv/i.test(url)) { try { const f = await plutoFreshUrl(url); if (f) url = f; } catch (_) {} }
   return new Promise((resolve, reject) => {
     if (!FFMPEG) return reject(new Error('FFmpeg is not available on this system'));
     stopRelay();
@@ -608,7 +645,8 @@ function stopMp4Relay() {
   mp4LiveMbps = 0;
   mp4Eof = false;
 }
-function startMp4Relay(url, opts) {
+async function startMp4Relay(url, opts) {
+  if (/pluto\.tv/i.test(url)) { try { const f = await plutoFreshUrl(url); if (f) url = f; } catch (_) {} }
   return new Promise((resolve, reject) => {
     if (!FFMPEG) return reject(new Error('FFmpeg is not available on this system'));
     stopMp4Relay();
