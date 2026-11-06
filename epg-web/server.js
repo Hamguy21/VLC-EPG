@@ -1060,6 +1060,17 @@ const server = http.createServer(async (req, res) => {
     }
     if (p === '/health') return sendJSON(res, 200, { ok: true, ts: Date.now() });
 
+    // Tiny echo endpoint for round-trip latency measurement.
+    if (p === '/ping' && req.method === 'GET') return sendJSON(res, 200, { ok: true, ts: Date.now() });
+
+    // Upload speed test: drain the request body, report bytes received.
+    if (p === '/uploadtest' && req.method === 'POST') {
+      let total = 0;
+      req.on('data', d => { total += d.length; });
+      req.on('end', () => sendJSON(res, 200, { received: total }));
+      return;
+    }
+
     // Simple download speed test: stream 8MB and let the client time it.
     if (p === '/speedtest' && req.method === 'GET') {
       const mb = 8;
