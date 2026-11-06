@@ -1447,7 +1447,7 @@ function monitorStall(ch, vid) {
     const playing = !vid.paused && vid.readyState >= 2;
     if (playing) {
       if (vid.currentTime !== last) { last = vid.currentTime; lastAt = now; }
-      else if (now - lastAt > 20000) {
+      else if (now - lastAt > 12000) {
         if (vid._reconnects >= 3) { toast('Stream stalled repeatedly — check your connection. Use VLC if it continues.', true); clearInterval(vid._stall); return; }
         // Is the feed actually over (clean EOF) rather than a blip?
         const ended = await checkFeedEnded(ch, vid);
