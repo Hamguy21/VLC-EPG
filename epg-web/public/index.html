@@ -202,6 +202,10 @@
     background:rgba(0,0,0,.78); color:#cfd6e4; font:11px/1.5 ui-monospace,Consolas,monospace;
     padding:10px 12px; border-radius:8px; border:1px solid rgba(255,255,255,.15); pointer-events:none; }
   .stats-overlay b { color:#fff; }
+  .stats-copy { pointer-events:auto; border:1px solid rgba(255,255,255,.25); background:rgba(255,255,255,.08);
+    color:#cfd6e4; border-radius:6px; padding:3px 10px; font:11px ui-monospace,Consolas,monospace;
+    cursor:pointer; margin-top:7px; display:inline-block; }
+  .stats-copy:hover { background:rgba(255,255,255,.16); }
   .ctx-menu { position:absolute; z-index:10; background:#161b26; border:1px solid var(--border);
     border-radius:10px; box-shadow:0 8px 30px rgba(0,0,0,.5); min-width:190px; overflow:hidden; }
   .ctx-menu .ctx-item { padding:9px 14px; font-size:13px; cursor:pointer; display:flex; justify-content:space-between; gap:14px; }
@@ -1483,8 +1487,22 @@ function updateStats() {
     `Connection Speed: ${speed}<br>` +
     `Network Activity: ${activity}` + graph + `<br>` +
     `Buffer Health: ${health} (${healthPct}% · ${ahead.toFixed(1)}s ahead)<br>` +
-    `Date: ${new Date().toLocaleString()}`;
+    `Date: ${new Date().toLocaleString()}<br>` +
+    `<button class="stats-copy" data-copy="1">⧉ Copy stats</button>`;
 }
+function copyStats() {
+  const t = $('statsOverlay').innerText;
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(t).then(() => toast('Stats copied to clipboard')).catch(() => copyStatsFallback(t));
+  } else copyStatsFallback(t);
+}
+function copyStatsFallback(t) {
+  const ta = document.createElement('textarea');
+  ta.value = t; document.body.appendChild(ta); ta.select();
+  try { document.execCommand('copy'); toast('Stats copied to clipboard'); } catch (_) { toast('Copy failed', true); }
+  document.body.removeChild(ta);
+}
+$('statsOverlay').addEventListener('click', e => { if (e.target.closest('[data-copy]')) copyStats(); });
 document.getElementById('wpVideo').addEventListener('contextmenu', e => {
   e.preventDefault();
   const hasStats = $('statsOverlay').style.display === 'block';
