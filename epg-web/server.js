@@ -568,6 +568,7 @@ let mp4File = null;
 let mp4Slug = null;
 let mp4BufferMs = 30000;
 let mp4Head = [];   // accumulated ffmpeg stderr (all) for codec parsing
+let mp4LiveMbps = 0;  // measured delivery throughput to the web client (Mbps)
 
 // Shared bitrate estimate (bytes/sec) of the relay output, used to size the
 // pre-roll and buffer windows in wall-clock terms.
@@ -587,6 +588,7 @@ function stopMp4Relay() {
   if (mp4Child) { try { mp4Child.kill(); } catch (_) {} mp4Child = null; }
   if (mp4File) { try { fs.rmSync(mp4File, { force: true }); } catch (_) {} mp4File = null; }
   mp4Slug = null;
+  mp4LiveMbps = 0;
 }
 function startMp4Relay(url, opts) {
   return new Promise((resolve, reject) => {
@@ -601,6 +603,7 @@ function startMp4Relay(url, opts) {
     const preRollSec = 10;   // buffer this much before starting playback
     brReset();
     mp4Head = [];
+    mp4LiveMbps = 0;
     const codecs = () => {
       const text = mp4Head.join('\n');
       let video = '', audio = '', res = '';
@@ -681,7 +684,7 @@ function streamGrowingFile(res, file, opts) {
     const now = Date.now();
     if (!outT0) outT0 = now;
     const dt = (now - outT0) / 1000;
-    if (dt >= 2) { outBps = outBytes / dt; outT0 = now; outBytes = 0; }
+    if (dt >= 2) { outBps = outBytes / dt; outT0 = now; outBytes = 0; mp4LiveMbps = outBps / 125000; }
   };
   const networkCapSec = () => {
     if (!outBps) return targetSec;
@@ -1150,7 +1153,7 @@ const server = http.createServer(async (req, res) => {
       const vm = text.match(/Video:\s*([^\s,]+)/); if (vm) video = vm[1];
       const am = text.match(/Audio:\s*([^\s,]+)/); if (am) audio = am[1];
       const rm = text.match(/(\d{2,5})x(\d{2,5})/); if (rm) resStr = rm[1] + '×' + rm[2];
-      return sendJSON(res, 200, { active: !!mp4Child, codecs: { video, audio, res: resStr } });
+      return sendJSON(res, 200, { active: !!mp4Child, connectionMbps: mp4LiveMbps, codecs: { video, audio, res: resStr } });
     }
 
     // Start an FFmpeg MP4 relay (native, blob-free web playback).

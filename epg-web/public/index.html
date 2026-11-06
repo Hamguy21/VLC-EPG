@@ -260,8 +260,7 @@
     background:var(--panel2); color:var(--text); font-size:13px; }
   .panel .p-section { font-size:11px; text-transform:uppercase; letter-spacing:.6px;
     color:var(--accent2); margin:2px 0 8px; font-weight:700; }
-  .panel .p-divider { color:var(--muted); font-size:13px; text-align:center; letter-spacing:2px;
-    padding:10px 0 8px; border-top:1px solid var(--border); margin-top:4px; user-select:none; }
+  .panel .p-divider { height:1px; background:var(--border); margin:14px 0 10px; }
 
   /* Production polish */
   :root {
@@ -463,7 +462,7 @@
       <div id="speedResult" style="margin-top:6px;font-size:12px;color:var(--muted)"></div>
     </div>
 
-    <div class="p-divider">______________</div>
+    <div class="p-divider"></div>
     <div class="p-section">Display</div>
     <div class="p-row">
       <span class="p-lbl">Date format</span>
@@ -479,7 +478,7 @@
       </label>
     </div>
 
-    <div class="p-divider">______________</div>
+    <div class="p-divider"></div>
     <div class="p-section">Language &amp; translation</div>
     <div class="p-row">
       <span class="p-lbl">Preferred language</span>
@@ -1460,7 +1459,11 @@ function toggleStats() {
   }
 }
 async function fetchRelayInfo() {
-  try { const j = await (await fetch('/relayinfo')).json(); if (j.codecs && (j.codecs.video || j.codecs.audio)) window._codecs = j.codecs; } catch (_) {}
+  try {
+    const j = await (await fetch('/relayinfo')).json();
+    if (j.codecs && (j.codecs.video || j.codecs.audio)) window._codecs = j.codecs;
+    window._liveMbps = j.connectionMbps || 0;
+  } catch (_) {}
 }
 function ensureCodecs() {
   if (!window._codecs || !(window._codecs.video || window._codecs.audio)) fetchRelayInfo();
@@ -1469,6 +1472,11 @@ function updateStats() {
   const v = $('wpVideo');
   const ov = $('statsOverlay');
   if (!v || ov.style.display !== 'block') { clearInterval(statsTimer); return; }
+  // keep the live connection rate fresh while the panel is open
+  if (!window._lastRelayFetch || Date.now() - window._lastRelayFetch > 2500) {
+    window._lastRelayFetch = Date.now();
+    fetchRelayInfo();
+  }
   if (window._lastBufEnd === undefined) window._lastBufEnd = 0;
   let ahead = 0, bufEnd = 0;
   if (v.buffered && v.buffered.length) { bufEnd = v.buffered.end(v.buffered.length - 1); ahead = Math.max(0, bufEnd - v.currentTime); }
@@ -1493,7 +1501,8 @@ function updateStats() {
   const cc = window._codecs || {};
   const cRes = cc.res || (window._lastMbps ? (window._lastMbps >= 8 ? '1920×1080' : window._lastMbps >= 3.2 ? '1280×720' : '854×480') : 'auto');
   const codecLine = (cc.video || '—') + ' / ' + (cc.audio || '—') + (cc.res ? ' @ ' + cc.res : '');
-  const speed = window._lastMbps ? window._lastMbps.toFixed(1) + ' Mbps (measured)' : '— (run speed test)';
+  const speed = window._liveMbps ? window._liveMbps.toFixed(1) + ' Mbps (live)'
+    : (window._lastMbps ? window._lastMbps.toFixed(1) + ' Mbps (measured)' : '— (run speed test)');
   const cs = (v.colorSpace && v.colorSpace.primaries) ? v.colorSpace.primaries : '—';
 
   ov.innerHTML =
