@@ -455,13 +455,13 @@ function relayHeaders(url) {
 // URL with the new token + stitcherParams, so each relay/restart uses a new
 // live session instead of replaying the same bounded (.
 const plutoZen = new Map(); // channel -> {url, at}
-async function plutoFreshUrl(masterUrl) {
+async function plutoFreshUrl(masterUrl, force) {
   try {
     const m = String(masterUrl).match(/\/channel\/([^/]+)\/master\.m3u8/i);
     if (!m) return null;
     const ch = m[1];
     const cached = plutoZen.get(ch);
-    if (cached && Date.now() - cached.at < 60 * 1000) return cached.url;
+    if (!force && cached && Date.now() - cached.at < 60 * 1000) return cached.url;
     const cid = crypto.randomUUID();
     const qs = new URLSearchParams({
       appName: 'web', appVersion: '9.1.0', deviceVersion: '133.0.0',
@@ -731,6 +731,11 @@ let mp4BufferMs = 30000;
 let mp4Head = [];   // accumulated ffmpeg stderr (all) for codec parsing
 let mp4LiveMbps = 0;  // measured delivery throughput to the web client (Mbps)
 let mp4Eof = false;    // set when the feed ended early (clean EOF shortly after start)
+let mp4Watch = null;    // stall-watchdog interval
+let mp4LastSize = 0;
+let mp4LastGrow = 0;
+let mp4TStart = 0;
+let mp4ForceFresh = false; // force a fresh session on watchdog restart
 let serverEvents = []; // ring buffer of server-side diagnostic events
 function sev(msg, extra) {
   try { serverEvents.push(Object.assign({ t: Date.now(), msg }, extra || {})); if (serverEvents.length > 400) serverEvents.shift(); } catch (_) {}
@@ -751,14 +756,38 @@ function brSample(size) {
 }
 function brBps() { return brEstimator.bps || 400000; }
 function stopMp4Relay() {
+  if (mp4Watch) { clearInterval(mp4Watch); mp4Watch = null; }
   if (mp4Child) { try { mp4Child.kill(); } catch (_) {} mp4Child = null; }
   if (mp4File) { try { fs.rmSync(mp4File, { force: true }); } catch (_) {} mp4File = null; }
   mp4Slug = null;
   mp4LiveMbps = 0;
   mp4Eof = false;
 }
+// Server-side stall watchdog: if the relay output stops growing for ~10s
+// (upstream hang) after warm-up, kill it and pre-emptively restart with a
+// fresh session so recovery is faster and zombies don't linger.
+function startMp4Watchdog(url, opts) {
+  clearInterval(mp4Watch);
+  mp4LastSize = 0; mp4LastGrow = Date.now();
+  mp4Watch = setInterval(() => {
+    if (!mp4Child) { clearInterval(mp4Watch); mp4Watch = null; return; }
+    let sz = 0; try { sz = fs.statSync(mp4File).size; } catch (_) {}
+    if (sz !== mp4LastSize) { mp4LastSize = sz; mp4LastGrow = Date.now(); return; }
+    const stuck = Date.now() - mp4LastGrow;
+    if (stuck > 10000 && Date.now() - mp4TStart > 20000) {
+      sev('watchdog_stall', { slug: mp4Slug, stuckMs: stuck });
+      clearInterval(mp4Watch); mp4Watch = null;
+      mp4ForceFresh = true;
+      stopMp4Relay();
+      startMp4Relay(url, opts)
+        .then(() => sev('watchdog_restarted', {}))
+        .catch(e => sev('watchdog_restart_failed', { msg: e.message }));
+    }
+  }, 2000);
+}
 async function startMp4Relay(url, opts) {
-  if (/pluto\.tv/i.test(url)) { try { const f = await plutoFreshUrl(url); if (f) url = f; } catch (_) {} }
+  if (/pluto\.tv/i.test(url)) { try { const f = await plutoFreshUrl(url, mp4ForceFresh); mp4ForceFresh = false; if (f) url = f; } catch (_) {} }
+  mp4TStart = Date.now();
   return new Promise((resolve, reject) => {
     if (!FFMPEG) return reject(new Error('FFmpeg is not available on this system'));
     stopMp4Relay();
@@ -812,7 +841,7 @@ async function startMp4Relay(url, opts) {
     });
     let settled = false;
     const fail = msg => { if (settled) return; settled = true; stopMp4Relay(); const er = new Error(msg); er.status = 422; reject(er); };
-    const done = () => { if (settled) return; settled = true; resolve({ url: `http://127.0.0.1:${PORT}/relaymp4/${slug}/live.mp4`, relay: true, slug, codecs: codecs() }); };
+    const done = () => { if (settled) return; settled = true; resolve({ url: `http://127.0.0.1:${PORT}/relaymp4/${slug}/live.mp4`, relay: true, slug, codecs: codecs() }); startMp4Watchdog(url, opts); };
     child.on('error', e => { sev('relay_error', { slug, msg: e.message }); fail('FFmpeg failed to start: ' + e.message); });
     child.on('exit', code => {
       if (mp4Child === child) mp4Child = null;
