@@ -585,8 +585,11 @@ function startMp4Relay(url) {
       '-rw_timeout', '15000000',
       '-i', url,
       '-c', 'copy',
+      '-bsf:a', 'aac_adtstoasc',   // required when remuxing HLS AAC -> MP4
+      '-fflags', '+genpts+flush_packets',
       '-f', 'mp4',
       '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
+      '-frag_duration', '500000',   // force a fragment every ~0.5s
       file,
     ];
     let child;
@@ -605,8 +608,8 @@ function startMp4Relay(url) {
     });
     const t0 = Date.now();
     const wait = setInterval(() => {
-      if (fs.existsSync(file) && fs.statSync(file).size >= 4096) { clearInterval(wait); done(); }
-      else if (Date.now() - t0 > 20000) { clearInterval(wait); fail('MP4 relay timed out: ' + errLines.join(' ').slice(-200)); }
+      if (fs.existsSync(file) && fs.statSync(file).size >= 131072) { clearInterval(wait); done(); } // >=128KB = init + fragments
+      else if (Date.now() - t0 > 25000) { clearInterval(wait); fail('MP4 relay timed out: ' + errLines.join(' ').slice(-200)); }
     }, 300);
   });
 }
@@ -628,7 +631,7 @@ function streamGrowingFile(res, file) {
       }
     } catch (_) {}
   };
-  const iv = setInterval(pump, 500);
+  const iv = setInterval(pump, 200);
   pump();
   res.on('close', () => clearInterval(iv));
 }
