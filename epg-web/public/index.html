@@ -532,6 +532,7 @@ const LS_NETCACHE = 'vlcEpgNetCache';
 const LS_RELAY = 'vlcEpgRelay';
 const LS_PLAYER = 'vlcEpgPlayer';
 const LS_HW = 'vlcEpgHw';
+const LS_LAST = 'vlcEpgLastSrc';
 
 function storageGet(key, fallback) {
   try { const value = localStorage.getItem(key); return value == null ? fallback : value; }
@@ -810,7 +811,7 @@ $('loadSaved').addEventListener('click', async () => {
     const s = sel[0];
     $('m3u').value = s.m3u;
     $('xmltv').value = s.xmltv || '';
-    await loadGuide();
+    try { await loadGuide(); storageSet(LS_LAST, s.name); } catch (_) {}
     return;
   }
   // merge multiple playlists
@@ -839,6 +840,7 @@ $('loadSaved').addEventListener('click', async () => {
     state.groups = [...groups];
     $('m3u').value = sel.map(s => s.m3u).join(',');
     $('xmltv').value = '';
+    storageSet(LS_LAST, sel[0].name);
     render();
     setStatus(allCh.length + ' channels merged from ' + sel.length + ' sources · ' + withEpg + ' with EPG');
   } catch (e) { setStatus('Merge failed: ' + e.message, 'err'); }
@@ -1806,6 +1808,16 @@ state.player = storageGet(LS_PLAYER, 'vlc') === 'web' ? 'web' : 'vlc';
 updatePlayerSeg();
 try { const nc = parseInt(storageGet(LS_NETCACHE, '3000'), 10); if (nc >= 300 && nc <= 10000) state.netCache = nc; } catch (_) {}
 refreshSavedDropdown('');
+// Auto-reopen the last loaded source so the guide isn't empty on start.
+(function autoOpenLast() {
+  const last = storageGet(LS_LAST, '');
+  if (!last) return;
+  const s = savedSources().find(x => x.name === last);
+  if (!s) return;
+  $('m3u').value = s.m3u;
+  $('xmltv').value = s.xmltv || '';
+  loadGuide();
+})();
 </script>
 </body>
 </html>
