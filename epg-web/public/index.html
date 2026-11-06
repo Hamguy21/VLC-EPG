@@ -424,7 +424,7 @@
 <script>
 const $ = id => document.getElementById(id);
 const stage = $('stage');
-const state = { channels: [], groups: [], now: Date.now(), fav: new Set(), current: null, dfmt: 'DMY', sel: null, view: [], lang: 'en', translate: false, fullscreen: false, netCache: 2000 };
+const state = { channels: [], groups: [], now: Date.now(), fav: new Set(), current: null, dfmt: 'DMY', sel: null, view: [], lang: 'en', translate: false, fullscreen: false, netCache: 3000 };
 let timer = null, toastTimer = null, activeLoadId = 0;
 const LS_SOURCES = 'vlcEpgSources';
 const LS_FAV = 'vlcEpgFavorites';
@@ -1404,7 +1404,7 @@ loadTv();
 try { const l = storageGet(LS_LANG, 'en'); if (/^[a-z]{2,3}$/.test(l)) state.lang = l; } catch (_) {}
 state.translate = storageGet(LS_TRANS, '0') === '1';
 state.fullscreen = storageGet(LS_FS, '0') === '1';
-try { const nc = parseInt(storageGet(LS_NETCACHE, '2000'), 10); if (nc >= 300 && nc <= 10000) state.netCache = nc; } catch (_) {}
+try { const nc = parseInt(storageGet(LS_NETCACHE, '3000'), 10); if (nc >= 300 && nc <= 10000) state.netCache = nc; } catch (_) {}
 refreshSavedDropdown('');
 </script>
 </body>

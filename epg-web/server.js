@@ -420,9 +420,10 @@ function matchChannels(channels, guide) {
 /* VLC playback                                                        */
 /* ------------------------------------------------------------------ */
 let vlcChild = null;
-// Many IPTV aggregators drop connections without a browser-like UA, and the
-// default . buffer drops short-lived stalls. Use a desktop UA + a sane cache.
-const DEFAULT_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
+// Pluto/iPhone HLS manifests are strict about the client signature. Match the
+// Chrome 133 Desktop (x86_64) UA the playlists use, keep a generous network
+// cache, and add a live cache so ad-transition stalls don't drop the stream.
+const DEFAULT_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36';
 function playStream(url, name, opts) {
   if (typeof url !== 'string' || url.length > 8192 || /[\u0000-\u001f\u007f]/.test(url) || url.startsWith('-')) {
     return Promise.reject(Object.assign(new Error('invalid stream URL'), { status: 400 }));
@@ -437,7 +438,9 @@ function playStream(url, name, opts) {
   return new Promise((resolve, reject) => {
     if (vlcChild) { try { vlcChild.kill(); } catch (_) {} vlcChild = null; }
     const args = ['--no-video-title-show'];
-    args.push('--network-caching=' + (opts && opts.networkCaching ? Math.min(10000, Math.max(300, +opts.networkCaching)) : 2000));
+    const cache = opts && opts.networkCaching ? Math.min(10000, Math.max(300, +opts.networkCaching)) : 3000;
+    args.push('--network-caching=' + cache);
+    args.push('--live-caching=' + Math.round(cache / 2));
     args.push('--http-user-agent=' + (opts && opts.userAgent ? String(opts.userAgent).slice(0, 240) : DEFAULT_UA));
     if (opts && opts.fullscreen) args.push('--fullscreen');
     if (name) args.push('--meta-title=' + name);
