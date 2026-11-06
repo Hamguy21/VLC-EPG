@@ -397,6 +397,7 @@
       <label class="fmt-opt" style="display:inline-flex;gap:8px">
         <input type="checkbox" id="autoTranslate"> Auto-translate missing programmes to my language
       </label>
+      <button class="btn ghost small" id="retranslate" style="margin-top:8px" title="Clear the translation cache and re-translate the visible programmes">⟳ Retranslate now</button>
     </div>
     <div class="p-actions">
       <button class="btn ghost" id="settClose">Close</button>
@@ -516,11 +517,17 @@ function visibleProgEls() {
   const st = stage, h = rowHeight(), ruler = rulerHeight();
   const topIdx = Math.max(0, Math.floor((st.scrollTop - ruler) / h));
   const bottomIdx = Math.min(state.view.length - 1, Math.ceil((st.scrollTop + st.clientHeight - ruler) / h));
+  const stRect = st.getBoundingClientRect();
+  const leftBound = stRect.left + (document.body.classList.contains('tv') ? 300 : 240);
+  const rightBound = stRect.right;
   const out = [];
   for (let i = topIdx; i <= bottomIdx; i++) {
     const row = document.getElementById('row-' + i);
     if (!row) continue;
-    row.querySelectorAll('.prog:not(.noinfo)').forEach(el => out.push(el));
+    row.querySelectorAll('.prog:not(.noinfo)').forEach(el => {
+      const r = el.getBoundingClientRect();
+      if (r.right >= leftBound && r.left <= rightBound) out.push(el);
+    });
   }
   return out;
 }
@@ -712,6 +719,12 @@ $('autoTranslate').addEventListener('change', e => {
   transGen++;
   if (state.translate) { if (state.channels.length) render(); else translateVisible(); }
   toast('Auto-translate ' + (state.translate ? 'on' : 'off'));
+});
+$('retranslate').addEventListener('click', () => {
+  transCache.clear();       // drop cached translations so fresh ones are fetched
+  transGen++;
+  if (state.channels.length) render();   // re-render triggers translation
+  toast('Retranslated');
 });
 $('prefLang').addEventListener('change', e => {
   state.lang = e.target.value;
@@ -982,6 +995,12 @@ function render() {
         title: el.dataset.tt, desc: el.dataset.desc, cat: el.dataset.cat,
         icon: el.dataset.icon || '', start: parseInt(el.dataset.start,10), stop: parseInt(el.dataset.stop,10)
       });
+    });
+    // double-click plays the program's channel immediately
+    el.addEventListener('dblclick', (e) => {
+      e.stopPropagation();
+      const ch = channels[parseInt(el.dataset.idx, 10)];
+      if (ch) playChannel(ch);
     });
   });
 
