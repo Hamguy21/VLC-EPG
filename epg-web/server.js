@@ -437,13 +437,14 @@ let vlcChild = null;
 // cache, and add a live cache so ad-transition stalls don't drop the stream.
 const DEFAULT_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36';
 
-function launchVlc(url, name, fullscreen) {
+function launchVlc(url, name, fullscreen, hw) {
   return new Promise((resolve, reject) => {
     if (vlcChild) { try { vlcChild.kill(); } catch (_) {} vlcChild = null; }
     const args = ['--no-video-title-show'];
     args.push('--network-caching=3000');
     args.push('--live-caching=1500');
     args.push('--http-user-agent=' + DEFAULT_UA);
+    if (hw) args.push('--avcodec-hw=dxva2');
     if (fullscreen) args.push('--fullscreen');
     if (name) args.push('--meta-title=' + name);
     args.push(url);
@@ -469,7 +470,7 @@ function playStream(url, name, opts) {
     return Promise.reject(Object.assign(new Error('unsupported stream protocol'), { status: 400 }));
   }
   if (typeof name === 'string') name = name.replace(/[\u0000-\u001f\u007f]/g, '').slice(0, 180);
-  return launchVlc(url, name, opts && opts.fullscreen);
+  return launchVlc(url, name, opts && opts.fullscreen, opts && opts.hw);
 }
 
 /* ---------- FFmpeg relay ---------- */
@@ -549,7 +550,7 @@ function startRelay(url) {
 }
 function playRelay(url, opts) {
   return startRelay(url).then(({ playUrl }) =>
-    launchVlc(playUrl, opts && opts.name, opts && opts.fullscreen)
+    launchVlc(playUrl, opts && opts.name, opts && opts.fullscreen, opts && opts.hw)
       .then(() => ({ launched: true, url, relay: true, playUrl })));
 }
 function stopPlay() {
@@ -686,9 +687,11 @@ function streamGrowingFile(res, file, opts) {
   };
 
   // Bytes we may release now (recent media is withheld to build the buffer).
+  // The hold is capped at 15MB so the buffer never grows unbounded and
+  // playback never hangs behind an ever-growing withhold.
   const releaseOffset = () => {
     const recv = recvBytes();
-    const holdBytes = bps() * holdSec();
+    const holdBytes = Math.min(bps() * holdSec(), 15 * 1024 * 1024);
     return Math.max(0, recv - holdBytes);
   };
 
@@ -1042,7 +1045,16 @@ const server = http.createServer(async (req, res) => {
         throw Object.assign(new Error('method not allowed'), { status: 405 });
       return serveIndex(req, res);
     }
-    if (p === '/health' && req.method === 'GET') return sendJSON(res, 200, { ok: true, ts: Date.now() });
+    if (p === '/health') return sendJSON(res, 200, { ok: true, ts: Date.now() });
+
+    // Simple download speed test: stream 8MB and let the client time it.
+    if (p === '/speedtest' && req.method === 'GET') {
+      const mb = 8;
+      const payload = Buffer.alloc(mb * 1024 * 1024, 0x5a);
+      res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Length': payload.length, 'Cache-Control': 'no-store' });
+      res.end(payload);
+      return;
+    }
 
     if (p === '/parse/m3u' && req.method === 'POST') {
       if (req.headers['content-type']?.split(';')[0].trim() !== 'application/json')
@@ -1086,11 +1098,11 @@ const server = http.createServer(async (req, res) => {
     if (p === '/play' && req.method === 'POST') {
       if (req.headers['content-type']?.split(';')[0].trim() !== 'application/json')
         throw Object.assign(new Error('content-type must be application/json'), { status: 415 });
-      const { url, name, fullscreen, networkCaching, userAgent, relay } = parseJSON(await readBody(req));
+      const { url, name, fullscreen, networkCaching, userAgent, relay, hw } = parseJSON(await readBody(req));
       if (typeof url !== 'string' || !url.trim()) throw Object.assign(new Error('url is required'), { status: 400 });
       let r;
-      if (relay) r = await playRelay(url, { name, fullscreen: !!fullscreen });
-      else r = await playStream(url, name, { fullscreen: !!fullscreen, networkCaching, userAgent });
+      if (relay) r = await playRelay(url, { name, fullscreen: !!fullscreen, hw: !!hw });
+      else r = await playStream(url, name, { fullscreen: !!fullscreen, networkCaching, userAgent, hw: !!hw });
       return sendJSON(res, 200, r);
     }
 
