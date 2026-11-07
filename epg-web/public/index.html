@@ -1365,6 +1365,15 @@ function makeCell() {
     const idx = state._gridSlots.findIndex(s => s.el === cell);
     if (idx >= 0) toggleGridDbg(idx);
   });
+  // Click anywhere on a playing cell re-opens the picker so you can swap the
+  // channel without closing the player. Control buttons/panels are ignored.
+  cell.addEventListener('click', e => {
+    if (e.target.closest('.gcontrols') || e.target.closest('.gclose') ||
+        e.target.closest('.gdbg') || e.target.closest('.gdbg-panel') ||
+        e.target.closest('.gadd') || e.target.closest('.gloading')) return;
+    const idx = state._gridSlots.findIndex(s => s.el === cell);
+    if (idx >= 0 && state._gridSlots[idx].ch) armGridCell(idx);
+  });
   bindCellControls(cell, cell.querySelector('video'));
   return cell;
 }
