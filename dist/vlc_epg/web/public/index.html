@@ -1498,6 +1498,8 @@ function wireMiniControls(inst) {
 function wireMiniInteractions(inst) {
   const box = inst.el, head = box.querySelector('.mp-head');
   const rz = box.querySelector('.mp-resize'), bl = box.querySelector('.mp-resize-bl'), tl = box.querySelector('.mp-resize-tl');
+  // interacting with a mini raises it above the others (front = last child)
+  box.addEventListener('pointerdown', () => bringMiniFront(inst));
   const toLeftTop = () => { const r = box.getBoundingClientRect(); box.style.left = r.left + 'px'; box.style.top = r.top + 'px'; box.style.right = 'auto'; box.style.bottom = 'auto'; };
   let dragging = false, sx = 0, sy = 0, ox = 0, oy = 0;
   head.addEventListener('pointerdown', e => {
