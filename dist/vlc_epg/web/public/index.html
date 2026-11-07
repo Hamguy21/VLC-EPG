@@ -1446,6 +1446,14 @@ function wireMiniClose(inst) {
     dbgLog('mini_expand', { ch: ch && ch.name });
   });
 }
+// Delegated close: guarantees any mini closes even if a per-instance listener
+// was lost (e.g. after an error overlay or a DOM hiccup).
+$('miniZone').addEventListener('click', e => {
+  const btn = e.target.closest('.mp-close'); if (!btn) return;
+  const box = btn.closest('.mini-player'); if (!box) return;
+  const inst = state._minis.find(m => m.el === box);
+  if (inst) closeMini(inst);
+});
 function closeMini(inst) {
   if (!inst || inst.destroyed) return;
   inst.destroyed = true;
