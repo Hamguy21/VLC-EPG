@@ -273,6 +273,7 @@
     </span>
     <span class="ghint">click a square then pick a channel · up to 4</span>
     <button class="btn ghost small" id="gridAdd">＋ Add channel</button>
+    <button class="btn ghost small" id="gridMin" title="Minimize — back to guide, keep channels playing">— Minimize</button>
     <button class="btn ghost small" id="gridClose">✕ Close</button>
     <span class="ghint bwhint">Tip: each player streams separately — bandwidth is split across them</span>
   </div>
@@ -1290,18 +1291,26 @@ function render() {
 /* ---------- Multiview grid (dynamic, up to 4 players) ---------- */
 function openGrid() {
   const gv = $('gridView'); if (!gv) return;
-  state._gridSlots = [];
-  state._gridSeq = 0;
-  state._gridArmed = null;
-  state._gridZap = '';
-  $('gridCells').innerHTML = '';
+  if (Array.isArray(state._gridSlots) && state._gridSlots.length) {
+    // already has playing slots — just show again
+  } else {
+    state._gridSlots = [];
+    state._gridSeq = 0;
+    state._gridArmed = null;
+    state._gridZap = '';
+    $('gridCells').innerHTML = '';
+    addSlot(); // default: one player
+  }
   gv.classList.toggle('gd-off', !state.debug);
   gv.style.display = 'flex';
   $('gridSearch').value = ''; hideGridList();
   const gg = $('gridGroup'); if (gg) { gg.innerHTML = '<option value="">All groups</option>' + state.groups.map(g => `<option>${escapeHtml(g)}</option>`).join(''); }
-  addSlot(); // default: one player
   $('gridAdd').focus();
-  state._gridTimer = setInterval(gridStallWatch, 3000);
+  if (!state._gridTimer) state._gridTimer = setInterval(gridStallWatch, 3000);
+}
+function minimizeGrid() {
+  const gv = $('gridView'); if (gv) gv.style.display = 'none';
+  hideGridList();
 }
 function closeGrid() {
   const gv = $('gridView'); if (gv) gv.style.display = 'none';
@@ -1549,6 +1558,7 @@ function gridZapCommit() {
   if (ch && ch.url) assignGridChannel(ch);
 }
 $('gridBtn').addEventListener('click', openGrid);
+$('gridMin').addEventListener('click', minimizeGrid);
 $('gridClose').addEventListener('click', closeGrid);
 $('gridAdd').addEventListener('click', addSlot);
 $('gridSearch').addEventListener('input', () => { showGridList($('gridSearch').value); });
