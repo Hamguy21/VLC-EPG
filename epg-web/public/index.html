@@ -1653,7 +1653,6 @@ function updateStats() {
   const codecLine = (cc.video || '—') + ' / ' + (cc.audio || '—') + (cc.res ? ' @ ' + cc.res : '');
   const speed = window._liveMbps ? window._liveMbps.toFixed(1) + ' Mbps (live)'
     : (window._lastMbps ? window._lastMbps.toFixed(1) + ' Mbps (measured)' : '— (run speed test)');
-  const cs = (v.colorSpace && v.colorSpace.primaries) ? v.colorSpace.primaries : '—';
 
   ov.innerHTML =
     `<b>Stats for nerds</b><br>` +
@@ -1661,7 +1660,6 @@ function updateStats() {
     `Current / Optimal Res: ${res} / ${cRes}<br>` +
     `Volume / Normalized: ${Math.round((v.volume||0)*100)}% / ${v.muted ? 'muted' : 'on'}<br>` +
     `Codecs: ${codecLine}<br>` +
-    `Color: ${cs}<br>` +
     `Connection Speed: ${speed}<br>` +
     `Network Activity: ${activity}` + graph + `<br>` +
     `Buffer Health: ${health} (${healthPct}% · ${ahead.toFixed(1)}s ahead)<br>` +
