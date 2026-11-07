@@ -229,6 +229,8 @@
     max-width:calc(100% - 24px); background:rgba(0,0,0,.82); color:#cfd6e4;
     font:11px/1.5 ui-monospace,Consolas,monospace; padding:10px 12px; border-radius:8px;
     border:1px solid rgba(255,255,255,.15); pointer-events:auto; }
+  .dbg-overlay .dbg-line { white-space:pre-wrap; padding:1px 0; word-break:break-word; }
+  .dbg-overlay .dbg-err { color:#ff8a8a; background:rgba(255,80,80,.10); border-radius:4px; }
   .ctx-menu { position:absolute; z-index:10; background:#161b26; border:1px solid var(--border);
     border-radius:10px; box-shadow:0 8px 30px rgba(0,0,0,.5); min-width:190px; overflow:hidden; }
   .ctx-menu .ctx-item { padding:9px 14px; font-size:13px; cursor:pointer; display:flex; justify-content:space-between; gap:14px; }
@@ -1922,20 +1924,35 @@ async function openDbg() {
   const ov = $('dbgOverlay');
   let srv = [];
   try { const j = await (await fetch('/debuglog')).json(); srv = j.events || []; } catch (_) {}
-  const fmt = e => {
+  // flag events that indicate a problem
+  const isErr = e => {
+    const k = String(e.k || e.msg || '');
+    if (/^(ffmpeg_exit_err|watchdog_stall|watchdog_restart_failed|relay_timeout|http_error|mp4_failed|web_failed|videofail|feed_ended)$/i.test(k)) return true;
+    if (e.code != null && Number(e.code) !== 0) return true;
+    return /\b(404|403|429|500|502|503|timeout|timed out|corrupt|exit err)\b/i.test(String(e.msg || e.tail || ''));
+  };
+  const mk = (e, tag) => {
     const lbl = e.k || e.msg || '?';
     const rest = (e.codecs ? ' codecs=' + JSON.stringify(e.codecs) : '') +
-      (e.msg && e.k ? ' msg=' + String(e.msg).slice(0, 120) : '') +
+      (e.msg && e.k ? ' msg=' + String(e.msg).slice(0, 160) : '') +
       (e.code != null ? ' code=' + e.code : '') +
       (e.ch ? ' ch=' + e.ch : '') +
       (e.how ? ' how=' + e.how : '') +
-      (e.num ? ' num=' + e.num : '');
-    return new Date(e.t).toLocaleTimeString() + ' ' + lbl + rest;
+      (e.num ? ' num=' + e.num : '') +
+      (e.tail ? ' tail=' + String(e.tail).replace(/\s+/g, ' ').slice(-240) : '');
+    return { t: (tag ? '[srv] ' : '') + new Date(e.t).toLocaleTimeString() + ' ' + lbl + rest, err: isErr(e) };
   };
-  const lines = [...dbg.events.map(fmt), ...srv.map(e => '[srv] ' + fmt(e))].slice(-90).join('\n');
+  let rows = [...dbg.events.map(e => mk(e, '')), ...srv.map(e => mk(e, 'srv'))].slice(-150);
+  const onlyErr = ov.dataset.onlyErr === '1';
+  const errCount = rows.filter(r => r.err).length;
+  if (onlyErr) rows = rows.filter(r => r.err);
+  const htmlRows = rows.map(r =>
+    `<div class="dbg-line ${r.err ? 'dbg-err' : ''}">${escapeHtml(r.t)}</div>`).join('');
   ov.innerHTML =
-    '<div style="font-weight:700;margin-bottom:6px">🐞 Debug records (' + dbg.events.length + ' client · ' + srv.length + ' server)</div>' +
-    '<pre style="max-height:300px;overflow:auto;white-space:pre-wrap;font:10px/1.4 ui-monospace,Consolas,monospace;margin:0 0 8px">' + escapeHtml(lines) + '</pre>' +
+    '<div style="font-weight:700;margin-bottom:6px">🐞 Debug records (' + dbg.events.length + ' client · ' + srv.length + ' server · ' + errCount + ' flagged)</div>' +
+    '<label class="fmt-opt" style="display:inline-flex;gap:6px;font-size:12px;margin:0 0 6px">' +
+      '<input type="checkbox" id="dbgOnlyErr"> Show errors only</label>' +
+    '<div id="dbgLines" style="max-height:300px;overflow:auto;font:10px/1.4 ui-monospace,Consolas,monospace;margin:0 0 8px">' + htmlRows + '</div>' +
     '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
       '<button class="stats-copy" id="dbgExport">⬇ Export JSON</button>' +
       '<button class="stats-copy" id="dbgCopy">⧉ Copy</button>' +
@@ -1943,6 +1960,9 @@ async function openDbg() {
       '<button class="stats-copy" id="dbgClose">Close</button>' +
     '</div>';
   ov.style.display = 'block';
+  ov.dataset.onlyErr = '0';
+  $('dbgOnlyErr').checked = false;
+  $('dbgOnlyErr').onchange = () => { ov.dataset.onlyErr = $('dbgOnlyErr').checked ? '1' : '0'; openDbg(); };
   $('dbgExport').onclick = () => exportDbg(srv);
   $('dbgCopy').onclick = () => {
     const payload = { app: 'vlc-epg', exportedAt: new Date().toISOString(),
