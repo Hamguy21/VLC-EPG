@@ -10,7 +10,6 @@ an IPTV **M3U playlist** and an **XMLTV EPG guide**, then fills VLC's playlist
 columns with program information and shows a "now/next" on-screen popup when you
 switch channels.
 
-![columns](images/columns.png)
 
 <img width="812" height="480" alt="drawer-open" src="https://github.com/user-attachments/assets/e795c64b-33a2-4100-bcc0-9fb158425917" />
 
