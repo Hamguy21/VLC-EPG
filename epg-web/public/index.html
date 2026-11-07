@@ -1884,6 +1884,7 @@ $('wpClose').addEventListener('click', closeWeb);
 function showCtx(x, y, hasStats) {
   const menu = $('ctxMenu');
   const q = state.quality;
+  const qLabel = q==='high'?'High (1080p)':q==='med'?'Medium (720p)':q==='low'?'Low (480p)':'Auto';
   const build = (tracks) => {
     const audioHtml = tracks.length
       ? `<div class="ctx-sep"></div><div class="ctx-item ctx-ah"><span>Audio track</span></div>` +
@@ -1897,10 +1898,15 @@ function showCtx(x, y, hasStats) {
       (state.debug ? `<div class="ctx-item" data-act="dbg"><span>🐞 Debug records (export)</span><span class="chk"></span></div><div class="ctx-sep"></div>` : '') +
       `<div class="ctx-item" data-act="stats"><span>Stats for nerds</span><span class="chk">${hasStats ? '✓' : ''}</span></div>` +
       `<div class="ctx-sep"></div>` +
-      `<div class="ctx-item" data-act="q-auto"><span>Quality</span><span class="chk">${q==='auto'?'Auto':''}</span></div>` +
-      `<div class="ctx-item" data-act="q-high"><span>&nbsp;&nbsp;High (1080p)</span><span class="chk">${q==='high'?'✓':''}</span></div>` +
-      `<div class="ctx-item" data-act="q-med"><span>&nbsp;&nbsp;Medium (720p)</span><span class="chk">${q==='med'?'✓':''}</span></div>` +
-      `<div class="ctx-item" data-act="q-low"><span>&nbsp;&nbsp;Low (480p)</span><span class="chk">${q==='low'?'✓':''}</span></div>` +
+      `<div class="ctx-qwrap">` +
+      `<div class="ctx-item" data-act="q-tog"><span>Quality</span><span class="chk">${qLabel}</span><span class="ctx-arrow">▸</span></div>` +
+      `<div class="ctx-submenu">` +
+        `<div class="ctx-item" data-act="q-auto"><span>Auto</span><span class="chk">${q==='auto'?'✓':''}</span></div>` +
+        `<div class="ctx-item" data-act="q-high"><span>High (1080p)</span><span class="chk">${q==='high'?'✓':''}</span></div>` +
+        `<div class="ctx-item" data-act="q-med"><span>Medium (720p)</span><span class="chk">${q==='med'?'✓':''}</span></div>` +
+        `<div class="ctx-item" data-act="q-low"><span>Low (480p)</span><span class="chk">${q==='low'?'✓':''}</span></div>` +
+      `</div>` +
+      `</div>` +
       audioHtml;
     const wp = $('webplayer').getBoundingClientRect();
     menu.style.left = Math.min(x - wp.left, wp.width - 230) + 'px';
@@ -1909,8 +1915,14 @@ function showCtx(x, y, hasStats) {
     document.querySelectorAll('#ctxMenu .ctx-item').forEach(it => {
       it.addEventListener('click', () => {
         const act = it.dataset.act;
+        let keep = false;
         if (act === 'stats') toggleStats();
         else if (act === 'dbg') openDbg();
+        else if (act === 'q-tog') {
+          const wrap = it.closest('.ctx-qwrap');
+          if (wrap) wrap.classList.toggle('open');
+          keep = true;
+        }
         else if (act && act.startsWith('q-')) {
           state.quality = act.slice(2);
           toast('Stream quality preference: ' + state.quality + ' (auto/priority; VLC uses adaptive HLS)');
@@ -1921,7 +1933,7 @@ function showCtx(x, y, hasStats) {
           const ch = state._cur;
           if (ch) { showLoader(true); startMp4(ch).catch(() => showPlayerErr('⚠ Audio track switch failed')); }
         }
-        menu.style.display = 'none';
+        if (!keep) menu.style.display = 'none';
       });
     });
   };

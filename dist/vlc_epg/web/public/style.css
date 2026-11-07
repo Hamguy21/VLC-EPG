@@ -215,6 +215,13 @@
   .ctx-menu .ctx-item:hover { background:rgba(86,115,245,.15); }
   .ctx-menu .ctx-sep { height:1px; background:var(--border); margin:4px 0; }
   .ctx-menu .ctx-item .chk { color:var(--accent2); }
+  .ctx-qwrap { position:relative; }
+  .ctx-qwrap .ctx-arrow { color:var(--muted); transition:transform .12s; font-size:11px; }
+  .ctx-qwrap.open .ctx-arrow { transform:rotate(90deg); }
+  .ctx-qwrap .ctx-submenu { position:absolute; left:100%; top:-4px; display:none; min-width:170px;
+    background:#161b26; border:1px solid var(--border); border-radius:10px;
+    box-shadow:0 8px 30px rgba(0,0,0,.45); z-index:16; padding:4px; }
+  .ctx-qwrap:hover .ctx-submenu, .ctx-qwrap.open .ctx-submenu { display:block; }
   /* player segmented control */
   .seg { display:inline-flex; border:1px solid var(--border); border-radius:8px; overflow:hidden; }
   .seg-btn { background:var(--panel2); color:var(--muted); border:none; padding:6px 12px;
