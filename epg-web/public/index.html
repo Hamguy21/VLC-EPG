@@ -1196,7 +1196,12 @@ function render() {
       const ch = channels[idx];
       if (!ch) return;
       selectAt(idx);
-      if (state.miniPlayer && state.player === 'web' && ch.url) { openMiniPlayer(ch); }
+      const webOpen = state.player === 'web' && $('webplayer') && $('webplayer').style.display === 'flex';
+      // If the main web player is the active surface (open/loading/playing),
+      // clicking any row zaps it to that channel mid-load instead of opening
+      // details or another mini.
+      if (webOpen && ch.url) { playFor(ch); }
+      else if (state.miniPlayer && state.player === 'web' && ch.url) { openMiniPlayer(ch); }
       else showChannelDetails(ch);
     });
   });
@@ -1242,7 +1247,12 @@ function render() {
       const ch = channels[idx];
       if (!ch) return;
       selectAt(idx);
-      if (state.miniPlayer && state.player === 'web' && ch.url) { openMiniPlayer(ch); }
+      const webOpen = state.player === 'web' && $('webplayer') && $('webplayer').style.display === 'flex';
+      // If the main web player is the active surface (open/loading/playing),
+      // clicking any row zaps it to that channel mid-load instead of opening
+      // details or another mini.
+      if (webOpen && ch.url) { playFor(ch); }
+      else if (state.miniPlayer && state.player === 'web' && ch.url) { openMiniPlayer(ch); }
       else showChannelDetails(ch);
     });
     el.addEventListener('dblclick', (e) => {
