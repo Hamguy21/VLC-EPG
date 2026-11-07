@@ -33,6 +33,27 @@ switch channels.
   to a channel that has guide data.
 - Remembers your playlist/guide URLs and display preferences between sessions.
 
+## Requirements
+
+- **VLC 3.0.x** — the extension targets VLC 3.0 (the Lua dialog `List` widget
+  used by fancier guides is not functional until VLC 4, so this extension uses
+  the native playlist columns instead).
+- **Node.js ≥ 16** — required only for the companion **Web UI / grid**. If Node
+  is missing, the server auto-installs a portable copy on first launch
+  (`start-web.bat` / `start-web.sh`), so you don't have to install it yourself.
+- **FFmpeg** — used by the web player to relay/transcode streams (with a
+  stable-stream fallback that re-encodes at a capped quality). If it's not on
+  your PATH, the server auto-downloads a bundled copy on first use.
+- **curl** — used by the Lua extension to fetch HTTPS/gzip sources that VLC's
+  stream API can't read directly (ships with Windows 10+, macOS, and Linux).
+- **Internet access** — the extension downloads playlists and EPG guides, and
+  the web player streams from the playlist's channel URLs.
+- **A playlist (M3U)** and optionally an **XMLTV EPG guide** URL or file.
+
+> The **Lua extension alone** (bare `vlc_epg.lua` in `extensions/`) needs only
+> VLC + curl. Node and FFmpeg are needed only for the web UI/grid, and both are
+> auto-provisioned, so there's nothing extra to install by hand.
+
 ## Install
 
 1. Quit VLC completely.
@@ -205,6 +226,3 @@ touching any markup or logic:
 
 Layout and component rules live separately in `public/style.css` for deeper
 changes.
-#   V L C - E P G 
- 
- 
