@@ -833,6 +833,7 @@ $('resetSettings').addEventListener('click', () => {
 $('dbgMode').addEventListener('change', e => {
   state.debug = e.target.checked;
   storageSet(LS_DEBUG, state.debug ? '1' : '0');
+  const gv = $('gridView'); if (gv) gv.classList.toggle('gd-off', !state.debug);
   if (state.debug) { dbgLog('debug_on', {}); toast('Debug mode on — events are being recorded'); }
   else toast('Debug mode off');
 });
@@ -1294,6 +1295,7 @@ function openGrid() {
   state._gridArmed = null;
   state._gridZap = '';
   $('gridCells').innerHTML = '';
+  gv.classList.toggle('gd-off', !state.debug);
   gv.style.display = 'flex';
   $('gridSearch').value = ''; hideGridList();
   const gg = $('gridGroup'); if (gg) { gg.innerHTML = '<option value="">All groups</option>' + state.groups.map(g => `<option>${escapeHtml(g)}</option>`).join(''); }
@@ -1385,9 +1387,7 @@ function syncGridCell(idx) {
   const s = state._gridSlots[idx]; if (!s) return;
   const vid = s.el.querySelector('video'), label = s.el.querySelector('.glabel'),
         closeBtn = s.el.querySelector('.gclose'), add = s.el.querySelector('.gadd'),
-        loading = s.el.querySelector('.gloading'), controls = s.el.querySelector('.gcontrols'),
-        dbgBtn = s.el.querySelector('.gdbg');
-  if (dbgBtn) dbgBtn.style.display = state.debug ? '' : 'none';
+        loading = s.el.querySelector('.gloading'), controls = s.el.querySelector('.gcontrols');
   s.el.classList.toggle('playing', !!s.url);
   s.el.classList.toggle('armed', state._gridArmed === idx);
   loading.style.display = (s.ch && !s.url) ? 'flex' : 'none';
