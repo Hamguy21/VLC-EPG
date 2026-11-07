@@ -1366,12 +1366,20 @@ async function playWeb(ch) {
   if (mp4Err) {
     dbgLog('hls_fallback', {});
     try { await startHlsPlay(ch); }
-    catch (e2) { if (!latest()) return; dbgLog('web_failed', { msg: e2.message }); setChErr(ch, e2.message); showPlayerErr('⚠ ' + ch.name + ' failed — ' + e2.message); toast('Channel failed: ' + e2.message, true); }
+    catch (e2) { if (!latest()) return; dbgLog('web_failed', { msg: e2.message }); const ul = labelUpstream(e2.message); const note = ul ? (ul + ' — ' + e2.message) : e2.message; setChErr(ch, note); showPlayerErr('⚠ ' + ch.name + ' failed — ' + note); toast('Channel failed: ' + note, true); }
   }
 }
 function showLoader(on) {
   const l = $('wpLoading'); if (l) l.style.display = on ? 'flex' : 'none';
   const v = $('wpVideo'); if (v) v.controls = !on;  // hide native spinner so only ours shows
+}
+function labelUpstream(errMsg) {
+  const m = String(errMsg || '');
+  if (/403|forbidden/i.test(m)) return 'source CDN returning 403 (geo/anti-leech)';
+  if (/404/i.test(m)) return 'source not found (404)';
+  if (/401|unauthorized/i.test(m)) return 'source requires sign-in (401)';
+  if (/timed out|timeout/i.test(m)) return 'source timed out';
+  return null;
 }
 function showPlayerErr(msg) {
   showLoader(false);
