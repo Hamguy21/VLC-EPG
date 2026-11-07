@@ -257,6 +257,7 @@
     <button class="mp-close" id="mpClose" title="Close preview">✕</button>
   </div>
   <video id="mpVideo" autoplay playsinline></video>
+  <div class="mp-resize" id="mpResize" title="Drag to resize"></div>
 </div>
 
 <!-- Web player overlay -->
@@ -1379,6 +1380,57 @@ $('mpClose').addEventListener('click', () => {
   box.style.display = 'none';
   vid.pause(); vid.removeAttribute('src'); vid.load();
 });
+
+// Make the mini player draggable (via its header) and resizable (corner handle).
+function initMiniInteractions() {
+  const box = $('miniPlayer'), head = box.querySelector('.mp-head'), rz = $('mpResize');
+  // switch from right/bottom anchoring to explicit left/top so move/resize math is simple
+  const toLeftTop = () => {
+    const r = box.getBoundingClientRect();
+    box.style.left = r.left + 'px'; box.style.top = r.top + 'px';
+    box.style.right = 'auto'; box.style.bottom = 'auto';
+  };
+  // drag
+  let dragging = false, sx = 0, sy = 0, ox = 0, oy = 0;
+  head.addEventListener('pointerdown', e => {
+    if (e.button !== 0) return;
+    toLeftTop(); dragging = true;
+    sx = e.clientX; sy = e.clientY;
+    ox = parseFloat(box.style.left) || 0; oy = parseFloat(box.style.top) || 0;
+    try { head.setPointerCapture(e.pointerId); } catch (_) {}
+  });
+  head.addEventListener('pointermove', e => {
+    if (!dragging) return;
+    const x = Math.max(0, Math.min(ox + (e.clientX - sx), window.innerWidth - box.offsetWidth));
+    const y = Math.max(0, Math.min(oy + (e.clientY - sy), window.innerHeight - box.offsetHeight));
+    box.style.left = x + 'px'; box.style.top = y + 'px';
+  });
+  const stopDrag = () => { dragging = false; };
+  head.addEventListener('pointerup', stopDrag);
+  head.addEventListener('pointercancel', stopDrag);
+  // resize
+  let resizing = false, rsx = 0, rsy = 0, rw = 0, rh = 0;
+  rz.addEventListener('pointerdown', e => {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    toLeftTop(); resizing = true;
+    rsx = e.clientX; rsy = e.clientY;
+    rw = box.offsetWidth; rh = box.offsetHeight;
+    try { rz.setPointerCapture(e.pointerId); } catch (_) {}
+  });
+  rz.addEventListener('pointermove', e => {
+    if (!resizing) return;
+    const left = parseFloat(box.style.left) || 0;
+    const top = parseFloat(box.style.top) || 0;
+    const w = Math.max(240, Math.min(rw + (e.clientX - rsx), window.innerWidth - left));
+    const h = Math.max(140, Math.min(rh + (e.clientY - rsy), window.innerHeight - top));
+    box.style.width = w + 'px'; box.style.height = h + 'px';
+  });
+  const stopResize = () => { resizing = false; };
+  rz.addEventListener('pointerup', stopResize);
+  rz.addEventListener('pointercancel', stopResize);
+}
+initMiniInteractions();
 function applyWebFs(on) {
   const el = $('webplayer');
   try {

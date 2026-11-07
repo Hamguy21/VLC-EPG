@@ -303,16 +303,23 @@
   .toast { max-width:min(90vw,640px); text-align:center; }
   .nowbar .nb-prog { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .nowbar .nb-time { white-space:nowrap; }
-  .mini-player { position:fixed; right:16px; bottom:16px; width:320px; max-width:80vw;
+  .mini-player { position:fixed; right:16px; bottom:16px; width:320px; max-width:85vw;
+    display:flex; flex-direction:column; min-width:240px; min-height:150px;
     background:var(--panel); border:1px solid var(--border); border-radius:12px; overflow:hidden;
-    box-shadow:0 12px 40px rgba(0,0,0,.6); z-index:95; }
+    box-shadow:0 12px 40px rgba(0,0,0,.6); z-index:95; touch-action:none; }
   .mini-player .mp-head { display:flex; align-items:center; justify-content:space-between;
-    padding:8px 12px; font-size:13px; font-weight:600; background:var(--panel2); }
+    padding:8px 12px; font-size:13px; font-weight:600; background:var(--panel2); cursor:move;
+    user-select:none; -webkit-user-select:none; }
   .mini-player .mp-title { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .mini-player .mp-close { border:none; background:transparent; color:var(--muted);
     font-size:14px; cursor:pointer; line-height:1; padding:2px 4px; }
   .mini-player .mp-close:hover { color:var(--text); }
-  .mini-player video { display:block; width:100%; height:180px; background:#000; object-fit:contain; }
+  .mini-player video { display:block; width:100%; flex:1; min-height:0;
+    background:#000; object-fit:contain; }
+  .mini-player .mp-resize { position:absolute; right:0; bottom:0; width:16px; height:16px;
+    cursor:nwse-resize; z-index:2; }
+  .mini-player .mp-resize::after { content:''; position:absolute; right:3px; bottom:3px;
+    width:8px; height:8px; border-right:2px solid var(--muted); border-bottom:2px solid var(--muted); }
 
   @media (max-width:900px) {
     html,body { overflow:hidden; }
