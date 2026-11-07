@@ -1886,14 +1886,14 @@ function showCtx(x, y, hasStats) {
   const q = state.quality;
   const qLabel = q==='high'?'High (1080p)':q==='med'?'Medium (720p)':q==='low'?'Low (480p)':'Auto';
   const build = (tracks) => {
-    const audioHtml = tracks.length
-      ? `<div class="ctx-sep"></div><div class="ctx-item ctx-ah"><span>Audio track</span></div>` +
-        tracks.map(t => {
-          const lang = t.lang ? ' (' + t.lang + ')' : '';
-          const on = state._aIdx === t.index || (state._aIdx == null && t.index === (tracks[0].index)) ? '✓' : '';
-          return `<div class="ctx-item" data-act="a-${t.index}"><span>&nbsp;&nbsp;${escapeHtml(t.codec)}${escapeHtml(lang)}</span><span class="chk">${on}</span></div>`;
-        }).join('')
-      : '';
+    const audioHtml = `<div class="ctx-sep"></div><div class="ctx-item ctx-ah"><span>Audio track</span></div>` +
+      (tracks.length
+        ? tracks.map(t => {
+            const lang = t.lang ? ' (' + t.lang + ')' : '';
+            const on = state._aIdx === t.index || (state._aIdx == null && t.index === (tracks[0].index)) ? '✓' : '';
+            return `<div class="ctx-item" data-act="a-${t.index}"><span>&nbsp;&nbsp;${escapeHtml(t.codec)}${escapeHtml(lang)}</span><span class="chk">${on}</span></div>`;
+          }).join('')
+        : `<div class="ctx-item" data-act="a-none" style="opacity:.6;cursor:default"><span>&nbsp;&nbsp;No audio info…</span></div>`);
     menu.innerHTML =
       (state.debug ? `<div class="ctx-item" data-act="dbg"><span>🐞 Debug records (export)</span><span class="chk"></span></div><div class="ctx-sep"></div>` : '') +
       `<div class="ctx-item" data-act="stats"><span>Stats for nerds</span><span class="chk">${hasStats ? '✓' : ''}</span></div>` +
@@ -1927,7 +1927,7 @@ function showCtx(x, y, hasStats) {
           state.quality = act.slice(2);
           toast('Stream quality preference: ' + state.quality + ' (auto/priority; VLC uses adaptive HLS)');
         }
-        else if (act && act.startsWith('a-')) {
+        else if (act && /^a-\d+$/.test(act)) {
           state._aIdx = parseInt(act.slice(2), 10);
           toast('Switching to audio track ' + state._aIdx + '…');
           const ch = state._cur;
