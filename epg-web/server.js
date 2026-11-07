@@ -583,12 +583,18 @@ async function startMp4WithRetry(url, opts) {
   catch (e) {
     if (e && e.status === 422 && !opts._retried) {
       opts._retried = true;
+      const msg = String(e.message || '');
       // Some streams carry MP2 (or other non-AAC) audio; the aac_adtstoasc
       // bitstream filter only supports AAC, so drop it on the retry.
-      if (/aac_adtstoasc|not supported by the bitstream filter|\bmp2\b/i.test(String(e.message || ''))) {
+      if (/aac_adtstoasc|not supported by the bitstream filter|\bmp2\b/i.test(msg)) {
         opts.noBsf = true;
       }
-      sev('relay_startup_retry', { noBsf: !!opts.noBsf });
+      // A selected audio stream that belongs to a non-selected HLS variant
+      // can't be re-mapped; fall back to the default audio rather than fail.
+      if (/matches no streams|option 'map'|Stream map/i.test(msg)) {
+        opts.aIdx = undefined;
+      }
+      sev('relay_startup_retry', { noBsf: !!opts.noBsf, dropAIdx: opts.aIdx === undefined });
       return startMp4Relay(url, opts);
     }
     throw e;
@@ -859,9 +865,15 @@ function stopMp4Relay(id) {
   if (r) { killRelay(r); mp4Relays.delete(key); }
 }
 function relayAudioTracks(head) {
+  const text = head.join('\n');
+  // Multi-variant HLS master playlists expose one audio per bitrate variant
+  // (all part of different Programs), not genuine alternate audio tracks.
+  // In that case only report the primary audio so the switcher doesn't offer
+  // bogus tracks that can't be re-mapped.
+  const vids = text.match(/Stream #0:\d+\(?[^)]*\)?: Video:/g) || [];
+  const multiVariant = vids.length > 1;
   const out = [];
   const seen = new Set();
-  const text = head.join('\n');
   const re = /Stream #0:(\d+)(?:\(([^)]+)\))?: Audio: ([^\s,]+)/g;
   let m;
   while ((m = re.exec(text))) {
@@ -870,6 +882,7 @@ function relayAudioTracks(head) {
     if (seen.has(key)) continue;
     seen.add(key);
     out.push({ index: idx, lang: m[2] || '', codec: m[3] });
+    if (multiVariant) break; // only the primary audio for multi-variant streams
   }
   return out;
 }

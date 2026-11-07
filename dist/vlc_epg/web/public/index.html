@@ -1937,10 +1937,17 @@ function showCtx(x, y, hasStats) {
           if (state._cur && $('webplayer').style.display === 'flex') { showLoader(true); startMp4(state._cur).catch(() => showPlayerErr('⚠ Quality switch failed')); }
         }
         else if (act && /^a-\d+$/.test(act)) {
-          state._aIdx = parseInt(act.slice(2), 10);
-          toast('Switching to audio track ' + state._aIdx + '…');
-          const ch = state._cur;
-          if (ch) { showLoader(true); startMp4(ch).catch(() => showPlayerErr('⚠ Audio track switch failed')); }
+          const chosen = parseInt(act.slice(2), 10);
+          const tracks = window._audioTracks || [];
+          const cur = state._aIdx != null ? state._aIdx : (tracks[0] ? tracks[0].index : null);
+          if (chosen === cur) {
+            toast('Already playing audio track ' + chosen);
+          } else {
+            state._aIdx = chosen;
+            toast('Switching to audio track ' + chosen + '…');
+            const ch = state._cur;
+            if (ch) { showLoader(true); startMp4(ch).catch(() => showPlayerErr('⚠ Audio track switch failed')); }
+          }
         }
         if (!keep) menu.style.display = 'none';
       });
