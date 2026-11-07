@@ -1886,14 +1886,21 @@ function showCtx(x, y, hasStats) {
   const q = state.quality;
   const qLabel = q==='high'?'High (1080p)':q==='med'?'Medium (720p)':q==='low'?'Low (480p)':'Auto';
   const build = (tracks) => {
-    const audioHtml = `<div class="ctx-sep"></div><div class="ctx-item ctx-ah"><span>Audio track</span></div>` +
-      (tracks.length
-        ? tracks.map(t => {
-            const lang = t.lang ? ' (' + t.lang + ')' : '';
-            const on = state._aIdx === t.index || (state._aIdx == null && t.index === (tracks[0].index)) ? '✓' : '';
-            return `<div class="ctx-item" data-act="a-${t.index}"><span>&nbsp;&nbsp;${escapeHtml(t.codec)}${escapeHtml(lang)}</span><span class="chk">${on}</span></div>`;
-          }).join('')
-        : `<div class="ctx-item" data-act="a-none" style="opacity:.6;cursor:default"><span>&nbsp;&nbsp;No audio info…</span></div>`);
+    const curTrack = tracks.find(t => state._aIdx === t.index) || tracks[0];
+    const audioLabel = curTrack ? (curTrack.codec + (curTrack.lang ? ' (' + curTrack.lang + ')' : '')) : '—';
+    const audioHtml = `<div class="ctx-sep"></div>` +
+      `<div class="ctx-qwrap">` +
+      `<div class="ctx-item" data-act="a-tog"><span>Audio track</span><span class="chk">${escapeHtml(audioLabel)}</span><span class="ctx-arrow">▸</span></div>` +
+      `<div class="ctx-submenu">` +
+        (tracks.length
+          ? tracks.map(t => {
+              const lang = t.lang ? ' (' + t.lang + ')' : '';
+              const on = state._aIdx === t.index || (state._aIdx == null && t.index === (tracks[0].index)) ? '✓' : '';
+              return `<div class="ctx-item" data-act="a-${t.index}"><span>${escapeHtml(t.codec)}${escapeHtml(lang)}</span><span class="chk">${on}</span></div>`;
+            }).join('')
+          : `<div class="ctx-item" data-act="a-none" style="opacity:.6;cursor:default"><span>No audio info…</span></div>`) +
+      `</div>` +
+      `</div>`;
     menu.innerHTML =
       (state.debug ? `<div class="ctx-item" data-act="dbg"><span>🐞 Debug records (export)</span><span class="chk"></span></div><div class="ctx-sep"></div>` : '') +
       `<div class="ctx-item" data-act="stats"><span>Stats for nerds</span><span class="chk">${hasStats ? '✓' : ''}</span></div>` +
@@ -1918,7 +1925,7 @@ function showCtx(x, y, hasStats) {
         let keep = false;
         if (act === 'stats') toggleStats();
         else if (act === 'dbg') openDbg();
-        else if (act === 'q-tog') {
+        else if (act === 'q-tog' || act === 'a-tog') {
           const wrap = it.closest('.ctx-qwrap');
           if (wrap) wrap.classList.toggle('open');
           keep = true;
