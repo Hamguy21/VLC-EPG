@@ -327,6 +327,9 @@
   .mini-player .mp-close:hover { color:var(--text); }
   .mini-player video { position:absolute; left:0; top:34px; width:100%;
     height:calc(100% - 34px); background:#000; object-fit:cover; }
+  .mini-player .mp-err { position:absolute; left:0; right:0; top:34px; bottom:0;
+    display:flex; align-items:center; justify-content:center; padding:10px; text-align:center;
+    background:rgba(0,0,0,.72); color:#ff9a9a; font-size:12px; z-index:5; }
   .mini-player .mp-controls { position:absolute; left:0; right:0; bottom:0;
     display:flex; align-items:center; gap:8px; padding:7px 10px;
     background:linear-gradient(transparent, rgba(0,0,0,.72)); z-index:4; }
