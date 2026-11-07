@@ -269,8 +269,10 @@
   .panel .p-actions { display:flex; gap:8px; margin-top:16px; justify-content:flex-end; }
   .panel .pref-lang { width:100%; padding:7px 10px; border-radius:8px; border:1px solid var(--border);
     background:var(--panel2); color:var(--text); font-size:13px; }
-  .panel .p-section { font-size:11px; text-transform:uppercase; letter-spacing:.6px;
-    color:var(--accent2); margin:2px 0 8px; font-weight:700; }
+  .panel .p-section { font-size:14px; text-transform:uppercase; letter-spacing:.5px;
+    color:var(--accent2); margin:4px 0 8px; font-weight:800; }
+  .panel .p-section.adv { display:none; }
+  .panel.adv-on .p-section.adv { display:block; }
   .panel .p-divider { height:1px; background:var(--border); margin:14px 0 10px; }
   /* Production polish */
   :root {
