@@ -11,6 +11,8 @@ columns with program information and shows a "now/next" on-screen popup when you
 switch channels.
 
 <img width="800" height="480" alt="drawer-open" src="https://github.com/user-attachments/assets/2f5a45c1-9ffb-4c23-b187-f12af4414708" />
+<img width="800" height="480" alt="grid" src="https://github.com/user-attachments/assets/04e022ab-822e-4be9-89fe-6d8ff14ff4e3" />
+
 ## What it does
 
 - Parses an M3U playlist from a **local file path** or **HTTP/HTTPS URL**
