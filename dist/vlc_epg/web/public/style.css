@@ -215,6 +215,7 @@
   .ctx-menu .ctx-item:hover { background:rgba(86,115,245,.15); }
   .ctx-menu .ctx-sep { height:1px; background:var(--border); margin:4px 0; }
   .ctx-menu .ctx-item .chk { color:var(--accent2); }
+  .ctx-menu .ctx-note { color:var(--muted); font-size:11px; font-weight:400; }
   .ctx-qwrap { position:relative; }
   .ctx-qwrap .ctx-arrow { color:var(--muted); transition:transform .12s; font-size:11px; }
   .ctx-qwrap.open .ctx-arrow { transform:rotate(90deg); }
