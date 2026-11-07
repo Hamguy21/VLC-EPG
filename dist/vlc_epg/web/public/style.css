@@ -463,3 +463,5 @@
   .gridview .gcell .gdbg-panel { position:absolute; top:34px; right:8px; z-index:8; width:210px;
     background:#161b26; border:1px solid var(--border); border-radius:10px; padding:10px;
     box-shadow:0 8px 30px rgba(0,0,0,.5); font-size:12px; line-height:1.5; }
+
+  .p-section .sec-ico { margin-right:7px; }
