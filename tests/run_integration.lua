@@ -53,6 +53,11 @@ local channels, groups, by_url, header_epg = mod.parse_m3u_lines(function() i = 
 check("parsed 5 channels", #channels == 5)
 check("header_epg picked up", header_epg ~= nil and #header_epg > 0)
 
+-- Fixed reference "now" inside the fixture's programme times
+-- (2026-11-06 01:30:52 UTC). Keeps the test deterministic regardless of the
+-- wall clock; parse_epg_stream's recency window uses this instead of os.time().
+local REF = 1793928652
+
 -- Build state and parse the EPG (streaming) the way fetch_epg would
 mod.state.channels = channels
 mod.state.name_map = {}
@@ -68,7 +73,7 @@ local estream = { read = function(_, n)
   pos = pos + #part
   return part
 end }
-local progs, name_map = mod.parse_epg_stream(estream, wanted, mod.build_wanted())
+local progs, name_map = mod.parse_epg_stream(estream, wanted, mod.build_wanted(), REF)
 -- note: build_wanted already used; recompute keys for a second channel table
 check("EPG has 5 channels", not not progs and next(progs) ~= nil)
 
@@ -87,7 +92,7 @@ check("all 5 channels matched", matched == 5)
 local items = {}
 for _, ch in ipairs(channels) do
   local item = { path = ch.url, name = ch.name, meta = {} }
-  local t = os.time()
+  local t = REF
   local cur = mod.now_next(ch, t)
   if cur and cur.cat and cur.cat ~= "" then item.meta.genre = cur.cat end
   if cur and cur.desc and cur.desc ~= "" then item.meta.album = cur.desc end

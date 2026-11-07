@@ -435,10 +435,11 @@ local function build_wanted()
   return wanted, keys
 end
 
-local function parse_epg_stream(s, wanted, keys)
+local  function parse_epg_stream(s, wanted, keys, now)
   local progs, name_map = {}, {}
-  local lo = os.time() - WINDOW_BEHIND
-  local hi = os.time() + WINDOW_AHEAD
+  local ts = now or os.time()
+  local lo = ts - WINDOW_BEHIND
+  local hi = ts + WINDOW_AHEAD
   local count = 0
 
   local function handle_channel(tag)
