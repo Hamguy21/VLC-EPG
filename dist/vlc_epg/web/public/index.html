@@ -269,7 +269,8 @@
       <input type="text" id="gridSearch" placeholder="Type to choose a channel…" autocomplete="off">
       <div class="jump-results" id="gridResults"></div>
     </span>
-    <span class="ghint">click an empty square, then pick a channel (or just type)</span>
+    <span class="ghint">click a square then pick a channel · ✕ closes it · up to 4</span>
+    <button class="btn ghost small" id="gridAdd">＋ Add channel</button>
     <button class="btn ghost small" id="gridClose">✕ Close</button>
   </div>
   <div class="grid-cells" id="gridCells"></div>
@@ -1272,62 +1273,108 @@ function render() {
   }, 30000);
 }
 
-/* ---------- Multiview grid (up to 4 channels) ---------- */
+/* ---------- Multiview grid (dynamic, up to 4 players) ---------- */
 function openGrid() {
   const gv = $('gridView'); if (!gv) return;
-  state._grid = [null, null, null, null];
+  state._gridSlots = [];
+  state._gridSeq = 0;
   state._gridArmed = null;
-  const wrap = $('gridCells'); wrap.innerHTML = '';
-  state._gridCells = [];
-  for (let i = 0; i < 4; i++) {
-    const cell = document.createElement('div');
-    cell.className = 'gcell'; cell.dataset.i = i;
-    cell.innerHTML = '<video autoplay playsinline></video>' +
-      '<div class="glabel"></div>' +
-      '<button class="gclose" title="Stop">✕</button>' +
-      '<div class="gadd">＋ Choose channel</div>';
-    cell.querySelector('.gclose').addEventListener('click', e => { e.stopPropagation(); stopGridCell(i); });
-    cell.querySelector('.gadd').addEventListener('click', e => { e.stopPropagation(); armGridCell(i); });
-    state._gridCells.push(cell);
-    wrap.appendChild(cell);
-  }
+  $('gridCells').innerHTML = '';
   gv.style.display = 'flex';
   $('gridSearch').value = ''; hideGridList();
-  $('gridSearch').focus();
+  addSlot(); // default: one player
+  $('gridAdd').focus();
 }
 function closeGrid() {
   const gv = $('gridView'); if (gv) gv.style.display = 'none';
   hideGridList();
-  for (let i = 0; i < 4; i++) stopGridCell(i);
-  state._grid = []; state._gridCells = []; state._gridArmed = null;
+  (state._gridSlots || []).slice().forEach((s, i) => removeSlot(i, true));
+  state._gridSlots = []; state._gridArmed = null;
 }
-function syncGridCell(i) {
-  const cell = state._gridCells[i]; if (!cell) return;
-  const g = state._grid[i];
-  const vid = cell.querySelector('video'), label = cell.querySelector('.glabel'),
-        closeBtn = cell.querySelector('.gclose'), add = cell.querySelector('.gadd');
-  cell.classList.toggle('playing', !!g);
-  cell.classList.toggle('armed', state._gridArmed === i);
-  if (g && g.url) {
-    label.textContent = g.ch.name;
+function relayout() {
+  const n = (state._gridSlots || []).length;
+  const wrap = $('gridCells');
+  wrap.className = 'grid-cells' + (n > 1 ? ' g' + n : '');
+}
+function makeCell() {
+  const cell = document.createElement('div');
+  cell.className = 'gcell';
+  cell.innerHTML = '<video autoplay playsinline></video>' +
+    '<div class="glabel"></div>' +
+    '<button class="gclose" title="Stop / close">✕</button>' +
+    '<div class="gadd">＋ Choose channel</div>';
+  cell.querySelector('.gclose').addEventListener('click', e => {
+    e.stopPropagation();
+    const idx = state._gridSlots.findIndex(s => s.el === cell);
+    if (idx >= 0) removeSlot(idx);
+  });
+  cell.querySelector('.gadd').addEventListener('click', e => {
+    e.stopPropagation();
+    const idx = state._gridSlots.findIndex(s => s.el === cell);
+    if (idx >= 0) armGridCell(idx);
+  });
+  return cell;
+}
+function addSlot() {
+  if (state._gridSlots.length >= 4) { toast('Up to 4 grid players', true); return; }
+  const el = makeCell();
+  state._gridSlots.push({ ch: null, url: null, id: null, el });
+  $('gridCells').appendChild(el);
+  relayout();
+}
+function removeSlot(idx, silent) {
+  const s = state._gridSlots[idx]; if (!s) return;
+  if (s.url) post('/stop', { id: s.id }).catch(() => {});
+  s.el.remove();
+  state._gridSlots.splice(idx, 1);
+  state._gridArmed = null;
+  relayout();
+}
+function syncGridCell(idx) {
+  const s = state._gridSlots[idx]; if (!s) return;
+  const vid = s.el.querySelector('video'), label = s.el.querySelector('.glabel'),
+        closeBtn = s.el.querySelector('.gclose'), add = s.el.querySelector('.gadd');
+  s.el.classList.toggle('playing', !!s.url);
+  s.el.classList.toggle('armed', state._gridArmed === idx);
+  if (s.url) {
+    label.textContent = s.ch.name;
     label.style.display = ''; closeBtn.style.display = ''; add.style.display = 'none';
-    if (vid.src !== g.url) { vid.src = g.url; vid.onloadedmetadata = () => vid.play().catch(() => {}); }
+    if (vid.src !== s.url) { vid.src = s.url; vid.onloadedmetadata = () => vid.play().catch(() => {}); }
   } else {
     label.style.display = 'none'; closeBtn.style.display = 'none'; add.style.display = 'flex';
     vid.removeAttribute('src'); vid.load();
   }
 }
-function armGridCell(i) {
-  state._gridArmed = i;
-  state._gridCells.forEach((c, k) => c.classList.toggle('armed', k === i));
-  const s = $('gridSearch'); if (s) { s.focus(); s.placeholder = 'Pick a channel for square ' + (i+1) + '…'; }
+function armGridCell(idx) {
+  state._gridArmed = idx;
+  state._gridSlots.forEach((s, k) => s.el.classList.toggle('armed', k === idx));
+  const s = $('gridSearch'); if (s) { s.focus(); s.placeholder = 'Pick a channel for player ' + (idx+1) + '…'; }
   showGridList('');
+}
+function startGridCell(idx, ch) {
+  const s = state._gridSlots[idx]; if (!s) return;
+  s.ch = ch; s.url = null;
+  if (!s.id) s.id = 'grid' + (++state._gridSeq);
+  post('/streammp4', { url: ch.url, buffer: state.webBuffer, scale: 'auto', id: s.id })
+    .then(r => { if (state._gridSlots[idx] === s && s.ch === ch) { s.url = r.url; syncGridCell(idx); } })
+    .catch(e => { s.ch = null; syncGridCell(idx); toast('Grid player ' + (idx+1) + ' failed: ' + e.message, true); });
+}
+function assignGridChannel(ch) {
+  let target = state._gridArmed;
+  if (target == null) {
+    target = state._gridSlots.findIndex(s => !s.ch);
+    if (target < 0) { if (state._gridSlots.length < 4) { addSlot(); target = state._gridSlots.findIndex(s => !s.ch); } else { toast('Up to 4 grid players', true); return; } }
+  }
+  state._gridArmed = null;
+  state._gridSlots.forEach(s => s.el.classList.remove('armed'));
+  $('gridSearch').value = ''; hideGridList(); $('gridSearch').placeholder = 'Type to choose a channel…';
+  startGridCell(target, ch);
 }
 function showGridList(q) {
   const list = $('gridChList'); if (!list) return;
   const query = (q || '').trim().toLowerCase();
   const matches = state.view.filter(c => c.url && (!query || c.name.toLowerCase().includes(query))).slice(0, 200);
-  list.innerHTML = '<div class="gcl-head">Choose a channel' + (state._gridArmed != null ? ' — square ' + (state._gridArmed+1) : '') + '</div>' +
+  list.innerHTML = '<div class="gcl-head">Choose a channel' + (state._gridArmed != null ? ' — player ' + (state._gridArmed+1) : '') + '</div>' +
     (matches.length
       ? matches.map(c => `<div class="gcl-item" data-n="${escapeHtml(c.name)}"><span class="gcl-name">${escapeHtml(c.name)}</span>${c.group ? `<span class="gcl-group">${escapeHtml(c.group)}</span>` : ''}</div>`).join('')
       : '<div class="gcl-item" style="opacity:.6;cursor:default">No channels match</div>');
@@ -1340,29 +1387,9 @@ function showGridList(q) {
   list.style.display = 'block';
 }
 function hideGridList() { const l = $('gridChList'); if (l) l.style.display = 'none'; }
-function startGridCell(i, ch) {
-  state._grid[i] = { ch, url: null };
-  post('/streammp4', { url: ch.url, buffer: state.webBuffer, scale: 'auto', id: 'grid' + i })
-    .then(r => { if (state._grid[i] && state._grid[i].ch === ch) { state._grid[i].url = r.url; syncGridCell(i); } })
-    .catch(e => { state._grid[i] = null; syncGridCell(i); toast('Grid square ' + (i+1) + ' failed: ' + e.message, true); });
-}
-function stopGridCell(i) {
-  const g = state._grid[i];
-  state._grid[i] = null;
-  if (g && g.url) post('/stop', { id: 'grid' + i }).catch(() => {});
-  if (state._gridCells && state._gridCells[i]) syncGridCell(i);
-}
-function assignGridChannel(ch) {
-  let target = state._gridArmed;
-  if (target == null) { target = state._grid.findIndex(g => !g); }
-  if (target < 0) { toast('All 4 grid squares are full', true); return; }
-  state._gridArmed = null;
-  state._gridCells.forEach(c => c.classList.remove('armed'));
-  $('gridSearch').value = ''; hideGridList(); $('gridSearch').placeholder = 'Type to choose a channel…';
-  startGridCell(target, ch);
-}
 $('gridBtn').addEventListener('click', openGrid);
 $('gridClose').addEventListener('click', closeGrid);
+$('gridAdd').addEventListener('click', addSlot);
 $('gridSearch').addEventListener('input', () => { showGridList($('gridSearch').value); });
 $('gridSearch').addEventListener('keydown', e => {
   if (e.key === 'Enter') {
@@ -1371,7 +1398,7 @@ $('gridSearch').addEventListener('keydown', e => {
   } else if (e.key === 'Escape') { hideGridList(); }
 });
 $('gridView').addEventListener('click', e => {
-  if (e.target === $('gridView') || e.target.closest('.grid-cells')) { if (!e.target.closest('.gcell')) hideGridList(); }
+  if (e.target === $('gridView')) hideGridList();
 });
 
 /* ---------- play + details ---------- */

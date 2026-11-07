@@ -415,7 +415,11 @@
   .gridview .gtitle { font-weight:700; }
   .gridview .gridsearchwrap { position:relative; flex:1; min-width:220px; }
   .gridview .ghint { font-size:12px; opacity:.6; }
-  .gridview .grid-cells { flex:1; display:grid; grid-template-columns:1fr 1fr; grid-template-rows:1fr 1fr; gap:10px; }
+  .gridview .grid-cells { flex:1; display:grid; grid-template-columns:1fr; grid-template-rows:1fr; gap:10px; }
+  .gridview .grid-cells.g2 { grid-template-columns:1fr 1fr; grid-template-rows:1fr; }
+  .gridview .grid-cells.g3 { grid-template-columns:1fr 1fr; grid-template-rows:1fr 1fr; }
+  .gridview .grid-cells.g3 .gcell:last-child { grid-column:1 / -1; }
+  .gridview .grid-cells.g4 { grid-template-columns:1fr 1fr; grid-template-rows:1fr 1fr; }
   .gridview .gcell { position:relative; background:#000; border-radius:10px; overflow:hidden;
     border:1px solid var(--border); box-shadow:0 6px 20px rgba(0,0,0,.4); }
   .gridview .gcell video { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; }
