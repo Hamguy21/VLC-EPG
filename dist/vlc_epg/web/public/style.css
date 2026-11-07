@@ -314,6 +314,11 @@
   .mini-player.idle .mp-head, .webplayer.idle .wp-head { opacity:0; pointer-events:none; }
   .webplayer .wp-head { transition:opacity .25s; }
   body.tv.cursor-idle, body.tv.cursor-idle * { cursor:none !important; }
+  #tvHint { position:fixed; left:50%; transform:translateX(-50%); bottom:18px; z-index:120;
+    font-size:12px; padding:6px 14px; background:rgba(0,0,0,.55); color:#eee;
+    border-radius:20px; opacity:0; transition:opacity .3s; pointer-events:none; white-space:nowrap; }
+  body.tv #tvHint { opacity:.95; }
+  body.tv.cursor-idle #tvHint { opacity:0; }
   .mini-player .mp-title { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .mini-player .mp-close { border:none; background:transparent; color:var(--muted);
     font-size:14px; cursor:pointer; line-height:1; padding:2px 4px; }

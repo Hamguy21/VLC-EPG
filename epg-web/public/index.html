@@ -167,6 +167,12 @@
       </label>
     </div>
     <div class="p-row">
+      <span class="p-lbl">Max mini players (1–4) — one per channel</span>
+      <select id="maxMiniSel">
+        <option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option>
+      </select>
+    </div>
+    <div class="p-row">
       <label class="fmt-opt" style="display:inline-flex;gap:8px">
         <input type="checkbox" id="chnoMode"> Show channel number on video (auto-hides)
       </label>
@@ -250,24 +256,9 @@
 
 <div class="toast" id="toast"></div>
 
-<!-- Mini preview player (program-click) -->
-<div class="mini-player" id="miniPlayer" style="display:none">
-  <div class="mp-head">
-    <span class="mp-title" id="mpTitle"></span>
-    <button class="mp-close" id="mpClose" title="Close preview">✕</button>
-  </div>
-  <video id="mpVideo" autoplay playsinline></video>
-  <div class="mp-controls" id="mpControls">
-    <button class="mp-btn" id="mpPlay" title="Play / Pause">▶</button>
-    <span class="mp-time" id="mpTime">0:00 / 0:00</span>
-    <input type="range" class="mp-seek" id="mpSeek" min="0" max="1000" value="0" title="Seek">
-    <button class="mp-btn" id="mpMute" title="Mute">🔊</button>
-    <input type="range" class="mp-vol" id="mpVol" min="0" max="100" value="100" title="Volume">
-  </div>
-  <div class="mp-resize" id="mpResize" title="Drag to resize"></div>
-  <div class="mp-resize-bl" id="mpResizeBL" title="Drag to resize"></div>
-  <div class="mp-resize-tl" id="mpResizeTL" title="Drag to resize"></div>
-</div>
+<!-- Mini preview players container (program-click; up to N) -->
+<div id="miniZone"></div>
+<div class="tvhint" id="tvHint" aria-hidden="true">↑/↓ channel · ←/→ time · Enter play · 0–9 zap · Back close</div>
 
 <!-- Web player overlay -->
 <div class="webplayer" id="webplayer" style="display:none">
@@ -297,7 +288,7 @@
 <script>
 const $ = id => document.getElementById(id);
 const stage = $('stage');
-const state = { channels: [], groups: [], now: Date.now(), fav: new Set(), current: null, dfmt: 'DMY', sel: null, view: [], lang: 'en', translate: false, fullscreen: false, netCache: 3000, relay: false, player: 'vlc', webBuffer: 30, hw: false, quality: 'auto', debug: false, autoRestart: true, chno: true, loadLast: true, h12: false, adv: false, useProxy: false, vpn: false, proxy: '', miniPlayer: true };
+const state = { channels: [], groups: [], now: Date.now(), fav: new Set(), current: null, dfmt: 'DMY', sel: null, view: [], lang: 'en', translate: false, fullscreen: false, netCache: 3000, relay: false, player: 'vlc', webBuffer: 30, hw: false, quality: 'auto', debug: false, autoRestart: true, chno: true, loadLast: true, h12: false, adv: false, useProxy: false, vpn: false, proxy: '', miniPlayer: true, maxMini: 1, _minis: [] };
 let timer = null, toastTimer = null, activeLoadId = 0;
 const LS_SOURCES = 'vlcEpgSources';
 const LS_FAV = 'vlcEpgFavorites';
@@ -323,6 +314,7 @@ const LS_USEPROXY = 'vlcEpgUseProxy';
 const LS_VPN = 'vlcEpgVpn';
 const LS_WEBUF = 'vlcEpgWebBuffer';
 const LS_MINI = 'vlcEpgMiniPlayer';
+const LS_MAXMINI = 'vlcEpgMaxMini';
 
 function storageGet(key, fallback) {
   try { const value = localStorage.getItem(key); return value == null ? fallback : value; }
@@ -691,6 +683,7 @@ function openSettings() {
   $('proxyEnableMode').checked = state.useProxy;
   $('vpnMode').checked = state.vpn;
   $('miniPlayerMode').checked = state.miniPlayer;
+  const _mms = $('maxMiniSel'); if (_mms) _mms.value = String(state.maxMini);
   updateProxyUI();
   const _panel = document.querySelector('#overlay .panel'); if (_panel) _panel.classList.toggle('adv-on', state.adv);
   $('dbgMode').checked = state.debug;
@@ -778,6 +771,11 @@ $('miniPlayerMode').addEventListener('change', e => {
   state.miniPlayer = e.target.checked;
   storageSet(LS_MINI, state.miniPlayer ? '1' : '0');
   toast('Mini preview player ' + (state.miniPlayer ? 'on' : 'off'));
+});
+$('maxMiniSel').addEventListener('change', e => {
+  state.maxMini = Math.min(4, Math.max(1, parseInt(e.target.value, 10) || 1));
+  storageSet(LS_MAXMINI, String(state.maxMini));
+  toast('Max mini players: ' + state.maxMini);
 });
 $('probeProxyBtn').addEventListener('click', async () => {
   const sel = $('proxyResults'), hint = $('proxyHint'), btn = $('probeProxyBtn');
@@ -1202,9 +1200,10 @@ function render() {
       if (!ch) return;
       // seamless: if the mini player is already playing this channel, hand its
       // stream off to the main player instead of relaunching
-      if (state._miniCh && state._miniCh.url === ch.url && $('miniPlayer').style.display !== 'none') {
-        const src = $('mpVideo').src;
-        hideMiniKeepRelay();
+      const mi = state._minis.find(m => m.ch_url === ch.url);
+      if (mi) {
+        const src = mi.vid.src;
+        closeMiniKeepRelay(mi);
         if (src) showWebWithSrc(ch, src); else playFor(ch);
         dbgLog('mini_to_web', { ch: ch.name });
         return;
@@ -1377,47 +1376,121 @@ function showPlayerErr(msg) {
   if (el) { el.textContent = msg || ''; el.style.display = msg ? 'flex' : 'none'; }
 }
 async function openMiniPlayer(ch) {
-  const box = $('miniPlayer'); if (!box) return;
-  const vid = $('mpVideo');
-  state._miniCh = ch;
-  $('mpTitle').textContent = ch.name;
-  box.style.display = 'block';
+  if (!ch || !ch.url) return;
+  const existing = state._minis.find(m => m.ch_url === ch.url);
+  if (existing) { bringMiniFront(existing); return; }
+  const max = Math.max(1, state.maxMini || 1);
+  while (state._minis.length >= max) closeMini(state._minis[0]);
+  const inst = makeMini(ch);
+  state._minis.push(inst);
   post('/stop', {}).catch(() => {});
-  vid.pause(); vid.removeAttribute('src'); vid.load();
-  dbgLog('mini_open', { ch: ch.name });
-  try {
-    const r4 = await post('/streammp4', { url: ch.url, buffer: state.webBuffer, tc: false, proxy: effectiveProxy() });
-    if (r4.codecs) window._codecs = r4.codecs;
-    vid.src = r4.url;
-    vid.onloadedmetadata = () => vid.play().catch(() => {});
-    vid.onerror = () => { dbgLog('mini_fail', {}); toast('Mini preview failed — try the main player', true); };
-  } catch (e) {
-    toast('Mini preview failed: ' + e.message, true);
-  }
+  (async () => {
+    try {
+      const r4 = await post('/streammp4', { url: ch.url, buffer: state.webBuffer, tc: false, proxy: effectiveProxy() });
+      if (inst.destroyed) return;
+      inst.src = r4.url;
+      inst.vid.src = r4.url;
+      inst.vid.onloadedmetadata = () => inst.vid.play().catch(() => {});
+      inst.vid.onerror = () => dbgLog('mini_fail', {});
+    } catch (e) { toast('Mini preview failed: ' + e.message, true); }
+  })();
 }
-$('mpClose').addEventListener('click', () => {
-  post('/stop', {}).catch(() => {});
-  const box = $('miniPlayer'), vid = $('mpVideo');
-  state._miniCh = null;
-  box.style.display = 'none';
-  vid.pause(); vid.removeAttribute('src'); vid.load();
-});
 
-// Seamless handoff helpers: swap the SAME relay stream between mini and main
-// players without restarting it (no /stop / relaunch).
 function stopVideoEl(vid) { try { if (!vid) return; vid.pause(); vid.removeAttribute('src'); vid.load(); } catch (_) {} }
-function showMiniWithSrc(ch, src) {
-  state._miniCh = ch;
-  $('miniPlayer').style.display = 'block';
-  $('mpTitle').textContent = ch ? ch.name : '';
-  const mv = $('mpVideo'); stopVideoEl(mv);
-  if (src) { mv.src = src; mv.onloadedmetadata = () => mv.play().catch(() => {}); }
+
+const MINI_TPL = `
+  <div class="mp-head"><span class="mp-title"></span><button class="mp-close" title="Close preview">✕</button></div>
+  <video autoplay playsinline></video>
+  <div class="mp-controls">
+    <button class="mp-btn mp-play" title="Play / Pause">▶</button>
+    <span class="mp-time">0:00 / 0:00</span>
+    <input type="range" class="mp-seek" min="0" max="1000" value="0" title="Seek">
+    <button class="mp-btn mp-mute" title="Mute">🔊</button>
+    <input type="range" class="mp-vol" min="0" max="100" value="100" title="Volume">
+  </div>
+  <div class="mp-resize"></div><div class="mp-resize-bl"></div><div class="mp-resize-tl"></div>`;
+
+function makeMini(ch) {
+  const wrap = document.createElement('div');
+  wrap.className = 'mini-player';
+  wrap.innerHTML = MINI_TPL;
+  $('miniZone').appendChild(wrap);
+  const inst = { el: wrap, vid: wrap.querySelector('video'), ch, ch_url: ch.url, src: null, destroyed: false };
+  wrap.querySelector('.mp-title').textContent = ch.name;
+  wireMiniControls(inst);
+  wireMiniInteractions(inst);
+  wireMiniClose(inst);
+  return inst;
 }
-function hideMiniKeepRelay() {
-  state._miniCh = null;
-  $('miniPlayer').style.display = 'none';
-  stopVideoEl($('mpVideo'));
+function wireMiniClose(inst) {
+  inst.el.querySelector('.mp-close').addEventListener('click', () => closeMini(inst));
 }
+function closeMini(inst) {
+  if (!inst || inst.destroyed) return;
+  inst.destroyed = true;
+  post('/stop', {}).catch(() => {});
+  inst.el.remove();
+  const i = state._minis.indexOf(inst); if (i >= 0) state._minis.splice(i, 1);
+}
+function closeMiniKeepRelay(inst) {
+  if (!inst || inst.destroyed) return;
+  inst.destroyed = true;
+  inst.el.remove();
+  const i = state._minis.indexOf(inst); if (i >= 0) state._minis.splice(i, 1);
+}
+function bringMiniFront(inst) { if (inst && inst.el) inst.el.parentNode.appendChild(inst.el); }
+
+function wireMiniControls(inst) {
+  const vid = inst.vid;
+  const playBtn = inst.el.querySelector('.mp-play'), seek = inst.el.querySelector('.mp-seek'),
+        timeEl = inst.el.querySelector('.mp-time'), mute = inst.el.querySelector('.mp-mute'), vol = inst.el.querySelector('.mp-vol');
+  const fmt = s => { s = Math.floor(s || 0); const m = Math.floor(s / 60); return m + ':' + String(s % 60).padStart(2, '0'); };
+  const upd = () => {
+    const d = vid.duration || 0;
+    if (d) seek.value = Math.round((vid.currentTime / d) * 1000);
+    timeEl.textContent = fmt(vid.currentTime) + ' / ' + fmt(d);
+    playBtn.textContent = vid.paused ? '▶' : '⏸';
+    vol.value = Math.round((vid.muted ? 0 : vid.volume) * 100);
+    mute.textContent = (vid.muted || vid.volume === 0) ? '🔇' : '🔊';
+  };
+  vid.addEventListener('timeupdate', upd); vid.addEventListener('play', upd); vid.addEventListener('pause', upd);
+  vid.addEventListener('loadedmetadata', upd); vid.addEventListener('volumechange', upd);
+  playBtn.addEventListener('click', () => { if (vid.paused) vid.play().catch(() => {}); else vid.pause(); });
+  seek.addEventListener('input', () => { const d = vid.duration || 0; if (d) vid.currentTime = (seek.value / 1000) * d; });
+  mute.addEventListener('click', () => { vid.muted = !(vid.muted || vid.volume === 0); if (!vid.muted && vid.volume === 0) vid.volume = 1; upd(); });
+  vol.addEventListener('input', () => { vid.volume = (+vol.value) / 100; vid.muted = vol.value === '0'; upd(); });
+}
+
+function wireMiniInteractions(inst) {
+  const box = inst.el, head = box.querySelector('.mp-head');
+  const rz = box.querySelector('.mp-resize'), bl = box.querySelector('.mp-resize-bl'), tl = box.querySelector('.mp-resize-tl');
+  const toLeftTop = () => { const r = box.getBoundingClientRect(); box.style.left = r.left + 'px'; box.style.top = r.top + 'px'; box.style.right = 'auto'; box.style.bottom = 'auto'; };
+  let dragging = false, sx = 0, sy = 0, ox = 0, oy = 0;
+  head.addEventListener('pointerdown', e => { if (e.button !== 0) return; toLeftTop(); dragging = true; sx = e.clientX; sy = e.clientY; ox = parseFloat(box.style.left) || 0; oy = parseFloat(box.style.top) || 0; try { head.setPointerCapture(e.pointerId); } catch (_) {} });
+  head.addEventListener('pointermove', e => { if (!dragging) return; const x = Math.max(0, Math.min(ox + (e.clientX - sx), window.innerWidth - box.offsetWidth)); const y = Math.max(0, Math.min(oy + (e.clientY - sy), window.innerHeight - box.offsetHeight)); box.style.left = x + 'px'; box.style.top = y + 'px'; });
+  const stopDrag = () => { dragging = false; };
+  head.addEventListener('pointerup', stopDrag); head.addEventListener('pointercancel', stopDrag);
+  const bindCorner = (handle, mode) => {
+    let a = false, csx = 0, csy = 0, cox = 0, coy = 0, cow = 0, coh = 0;
+    handle.addEventListener('pointerdown', e => { if (e.button !== 0) return; e.stopPropagation(); toLeftTop(); a = true; csx = e.clientX; csy = e.clientY; cox = parseFloat(box.style.left) || 0; coy = parseFloat(box.style.top) || 0; cow = box.offsetWidth; coh = box.offsetHeight; try { handle.setPointerCapture(e.pointerId); } catch (_) {} });
+    handle.addEventListener('pointermove', e => { if (!a) return; const dx = e.clientX - csx, dy = e.clientY - csy; let L = cox, T = coy, W = cow, H = coh; if (mode === 'tl') { L=cox+dx; T=coy+dy; W=cow-dx; H=coh-dy; } else if (mode==='bl') { L=cox+dx; W=cow-dx; H=coh+dy; } else { W=cow+dx; H=coh+dy; } if (W<240){ L=cox+(cow-240); W=240; } if (H<140){ if(mode==='tl') T=coy+(coh-140); H=140; } if (L<0){ W+=L; L=0; } if (T<0){ H+=T; T=0; } if (L+W>window.innerWidth) W=window.innerWidth-L; if (T+H>window.innerHeight) H=window.innerHeight-T; if (W<240) W=240; if (H<140) H=140; box.style.left=L+'px'; box.style.top=T+'px'; box.style.width=W+'px'; box.style.height=H+'px'; });
+    const end = () => { a = false; };
+    handle.addEventListener('pointerup', end); handle.addEventListener('pointercancel', end);
+  };
+  bindCorner(rz, 'br'); bindCorner(bl, 'bl'); bindCorner(tl, 'tl');
+}
+
+// Show a mini for a channel using an existing relay URL (handoff, no relaunch).
+function openMiniWithSrc(ch, src) {
+  if (!ch || !ch.url) return;
+  const existing = state._minis.find(m => m.ch_url === ch.url);
+  if (existing) { bringMiniFront(existing); if (src && existing.vid.getAttribute('src') !== src) { existing.vid.src = src; existing.vid.play().catch(() => {}); } return; }
+  const max = Math.max(1, state.maxMini || 1);
+  while (state._minis.length >= max) closeMini(state._minis[0]);
+  const inst = makeMini(ch); state._minis.push(inst);
+  if (src) { inst.src = src; inst.vid.src = src; inst.vid.onloadedmetadata = () => inst.vid.play().catch(() => {}); }
+}
+
 function showWebWithSrc(ch, src) {
   state._cur = ch || state._cur;
   $('webplayer').style.display = 'flex';
@@ -1428,164 +1501,39 @@ function showWebWithSrc(ch, src) {
 $('wpMini').addEventListener('click', () => {
   const src = $('wpVideo').src;
   const ch = state._cur;
-  $('webplayer').style.display = 'none';   // hide main without stopping the relay
+  $('webplayer').style.display = 'none';
   stopVideoEl($('wpVideo'));
-  if (src) showMiniWithSrc(ch, src);
+  if (src) openMiniWithSrc(ch, src);
   else if (ch) openMiniPlayer(ch);
   dbgLog('to_mini', { ch: ch && ch.name });
 });
 
-// Make the mini player draggable (via its header) and resizable (corner handle).
-function initMiniInteractions() {
-  const box = $('miniPlayer'), head = box.querySelector('.mp-head'), rz = $('mpResize');
-  // switch from right/bottom anchoring to explicit left/top so move/resize math is simple
-  const toLeftTop = () => {
-    const r = box.getBoundingClientRect();
-    box.style.left = r.left + 'px'; box.style.top = r.top + 'px';
-    box.style.right = 'auto'; box.style.bottom = 'auto';
-  };
-  // drag
-  let dragging = false, sx = 0, sy = 0, ox = 0, oy = 0;
-  head.addEventListener('pointerdown', e => {
-    if (e.button !== 0) return;
-    toLeftTop(); dragging = true;
-    sx = e.clientX; sy = e.clientY;
-    ox = parseFloat(box.style.left) || 0; oy = parseFloat(box.style.top) || 0;
-    try { head.setPointerCapture(e.pointerId); } catch (_) {}
-  });
-  head.addEventListener('pointermove', e => {
-    if (!dragging) return;
-    const x = Math.max(0, Math.min(ox + (e.clientX - sx), window.innerWidth - box.offsetWidth));
-    const y = Math.max(0, Math.min(oy + (e.clientY - sy), window.innerHeight - box.offsetHeight));
-    box.style.left = x + 'px'; box.style.top = y + 'px';
-  });
-  const stopDrag = () => { dragging = false; };
-  head.addEventListener('pointerup', stopDrag);
-  head.addEventListener('pointercancel', stopDrag);
-  // resize
-  let resizing = false, rsx = 0, rsy = 0, rw = 0, rh = 0;
-  rz.addEventListener('pointerdown', e => {
-    if (e.button !== 0) return;
-    e.stopPropagation();
-    toLeftTop(); resizing = true;
-    rsx = e.clientX; rsy = e.clientY;
-    rw = box.offsetWidth; rh = box.offsetHeight;
-    try { rz.setPointerCapture(e.pointerId); } catch (_) {}
-  });
-  rz.addEventListener('pointermove', e => {
-    if (!resizing) return;
-    const left = parseFloat(box.style.left) || 0;
-    const top = parseFloat(box.style.top) || 0;
-    const w = Math.max(240, Math.min(rw + (e.clientX - rsx), window.innerWidth - left));
-    const h = Math.max(140, Math.min(rh + (e.clientY - rsy), window.innerHeight - top));
-    box.style.width = w + 'px'; box.style.height = h + 'px';
-  });
-  const stopResize = () => { resizing = false; };
-  rz.addEventListener('pointerup', stopResize);
-  rz.addEventListener('pointercancel', stopResize);
-  // generic corner resize: mode 'tl' adjusts left/top/width/height; 'bl'
-  // adjusts left/width + height (bottom anchored); 'br' = corner (default)
-  const bindCorner = (handle, mode) => {
-    let a = false, sx = 0, sy = 0, ox = 0, oy = 0, ow = 0, oh = 0;
-    handle.addEventListener('pointerdown', e => {
-      if (e.button !== 0) return;
-      e.stopPropagation();
-      toLeftTop(); a = true;
-      sx = e.clientX; sy = e.clientY;
-      ox = parseFloat(box.style.left) || 0; oy = parseFloat(box.style.top) || 0;
-      ow = box.offsetWidth; oh = box.offsetHeight;
-      try { handle.setPointerCapture(e.pointerId); } catch (_) {}
-    });
-    handle.addEventListener('pointermove', e => {
-      if (!a) return;
-      const dx = e.clientX - sx, dy = e.clientY - sy;
-      let L = ox, T = oy, W = ow, H = oh;
-      if (mode === 'tl') { L = ox + dx; T = oy + dy; W = ow - dx; H = oh - dy; }
-      else if (mode === 'bl') { L = ox + dx; W = ow - dx; H = oh + dy; }
-      else { W = ow + dx; H = oh + dy; } // br
-      if (W < 240) { L = ox + (ow - 240); W = 240; }
-      if (H < 140) { if (mode === 'tl') T = oy + (oh - 140); H = 140; }
-      if (L < 0) { W += L; L = 0; }
-      if (T < 0) { H += T; T = 0; }
-      if (L + W > window.innerWidth) W = window.innerWidth - L;
-      if (T + H > window.innerHeight) H = window.innerHeight - T;
-      if (W < 240) W = 240;
-      if (H < 140) H = 140;
-      box.style.left = L + 'px'; box.style.top = T + 'px';
-      box.style.width = W + 'px'; box.style.height = H + 'px';
-    });
-    const end = () => { a = false; };
-    handle.addEventListener('pointerup', end);
-    handle.addEventListener('pointercancel', end);
-  };
-  bindCorner($('mpResizeBL'), 'bl');
-  bindCorner($('mpResizeTL'), 'tl');
-}
-initMiniInteractions();
-
-// Video controls for the mini player (play/pause, seek, time, mute, volume).
-function initMiniControls() {
-  const vid = $('mpVideo'), playBtn = $('mpPlay'), seek = $('mpSeek'),
-        timeEl = $('mpTime'), mute = $('mpMute'), vol = $('mpVol');
-  const fmt = s => { s = Math.floor(s || 0); const m = Math.floor(s / 60); return m + ':' + String(s % 60).padStart(2, '0'); };
-  const upd = () => {
-    const d = vid.duration || 0;
-    if (d) seek.value = Math.round((vid.currentTime / d) * 1000);
-    timeEl.textContent = fmt(vid.currentTime) + ' / ' + fmt(d);
-    playBtn.textContent = vid.paused ? '▶' : '⏸';
-    vol.value = Math.round((vid.muted ? 0 : vid.volume) * 100);
-    mute.textContent = (vid.muted || vid.volume === 0) ? '🔇' : '🔊';
-  };
-  vid.addEventListener('timeupdate', upd);
-  vid.addEventListener('play', upd);
-  vid.addEventListener('pause', upd);
-  vid.addEventListener('loadedmetadata', upd);
-  vid.addEventListener('volumechange', upd);
-  playBtn.addEventListener('click', () => { if (vid.paused) vid.play().catch(() => {}); else vid.pause(); });
-  seek.addEventListener('input', () => { const d = vid.duration || 0; if (d) vid.currentTime = (seek.value / 1000) * d; });
-  mute.addEventListener('click', () => { vid.muted = !(vid.muted || vid.volume === 0); if (!vid.muted && vid.volume === 0) vid.volume = 1; upd(); });
-  vol.addEventListener('input', () => { vid.volume = (+vol.value) / 100; vid.muted = vol.value === '0'; upd(); });
-}
-initMiniControls();
-
-// Auto-hide the player header when idle (mouse still). Move the mouse or press
-// Up (remote) to reveal it.
+// Auto-hide player headers when idle; press Up or move mouse to reveal.
 function armPlayerAutoHide() {
   if (window._playerAutoHide) return; window._playerAutoHide = true;
-  const map = [['webplayer', 'wp-head'], ['miniPlayer', 'mp-head']];
   const openBox = () => {
-    for (const [id, hdr] of map) {
-      const el = $(id); if (el && el.style.display !== 'none') return { box: el, hdr };
-    }
+    if ($('webplayer').style.display === 'flex') return { box: $('webplayer') };
+    if (state._minis.length) return { box: state._minis[state._minis.length - 1].el };
     return null;
   };
   let t = null;
   const hide = (o) => o && o.box.classList.add('idle');
-  const kick = () => {
-    const o = openBox(); if (!o) return;
-    o.box.classList.remove('idle');
-    clearTimeout(t);
-    t = setTimeout(() => hide(o), 2800);
-  };
+  const kick = () => { const o = openBox(); if (!o) return; o.box.classList.remove('idle'); clearTimeout(t); t = setTimeout(() => hide(o), 2800); };
   document.addEventListener('mousemove', kick);
   document.addEventListener('keydown', e => { if (e.key === 'ArrowUp') kick(); });
 }
 armPlayerAutoHide();
 
-// TV mode: auto-hide the mouse cursor after inactivity (remote-friendly).
 function armTvCursorHide() {
   if (window._tvCursorHide) return; window._tvCursorHide = true;
   let t = null;
-  const show = () => {
-    document.body.classList.remove('cursor-idle');
-    clearTimeout(t);
-    t = setTimeout(() => { if (document.body.classList.contains('tv')) document.body.classList.add('cursor-idle'); }, 3000);
-  };
+  const show = () => { document.body.classList.remove('cursor-idle'); clearTimeout(t); t = setTimeout(() => { if (document.body.classList.contains('tv')) document.body.classList.add('cursor-idle'); }, 3000); };
   document.addEventListener('mousemove', show);
   document.addEventListener('keydown', show);
   show();
 }
 armTvCursorHide();
+
 function applyWebFs(on) {
   const el = $('webplayer');
   try {
@@ -2297,6 +2245,14 @@ if (e.key === 'Escape') {
 // ignore when typing in an input/select/textarea
 const t = e.target;
 if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA')) return;
+// remote "Back": step back through open layers (settings / details / player / mini)
+if (e.key === 'Backspace' || e.key === 'BrowserBack') {
+  e.preventDefault();
+  if ($('overlay').classList.contains('open')) { closeSettings(); return; }
+  if ($('details').classList.contains('open')) { closeDetails(); return; }
+  if ($('webplayer').style.display === 'flex') { closeWeb(); return; }
+  if (state._minis.length) { closeMini(state._minis[state._minis.length - 1]); return; }
+}
 if ($('webplayer').style.display === 'flex') { handlePlayerKey(e); return; }
 if (!state.view.length) return;
 if (/^[0-9]$/.test(e.key)) {
@@ -2415,6 +2371,7 @@ state.proxy = storageGet(LS_PROXY, '');
 state.useProxy = storageGet(LS_USEPROXY, '0') === '1';
 state.vpn = storageGet(LS_VPN, '0') === '1';
 state.miniPlayer = storageGet(LS_MINI, '1') === '1';
+state.maxMini = Math.min(4, Math.max(1, parseInt(storageGet(LS_MAXMINI, '1'), 10) || 1));
 state.debug = storageGet(LS_DEBUG, '0') === '1';
 state.autoRestart = storageGet(LS_AR, '1') === '1';
 state.player = storageGet(LS_PLAYER, 'vlc') === 'web' ? 'web' : 'vlc';
