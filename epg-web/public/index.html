@@ -45,6 +45,12 @@
       <option value="fav">Favorites</option>
       <option value="epg">With EPG</option>
     </select>
+    <span class="grp">Lang:</span>
+    <select id="langF"><option value="">All languages</option></select>
+    <span class="grp">Genre:</span>
+    <select id="genreF"><option value="">All genres</option></select>
+    <span class="grp">Category:</span>
+    <select id="catF"><option value="">All categories</option></select>
     <span class="grp">Search:</span><input type="text" id="q" placeholder="channel or program…">
     <span class="grp">Window:</span>
     <select id="window">
@@ -977,6 +983,25 @@ function buildRuler(halfHours, pxPerHour, now, width, chW) {
   return html + '</div>';
 }
 function favKey(ch) { return ch.tvg_id || ch.name; }
+function progHasLang(p, lang) {
+  const l = String(lang).toLowerCase();
+  if (p.lang && String(p.lang).toLowerCase() === l) return true;
+  if ((p.titles || []).some(v => String(v.lang || '').toLowerCase() === l)) return true;
+  if ((p.descs || []).some(v => String(v.lang || '').toLowerCase() === l)) return true;
+  return false;
+}
+function populateSelect(id, values, allLabel) {
+  const el = $(id); if (!el) return;
+  const cur = el.value;
+  const seen = new Set();
+  let html = `<option value="">${allLabel}</option>`;
+  for (const v of values) {
+    if (!v || seen.has(v)) continue;
+    seen.add(v);
+    html += `<option ${v === cur ? 'selected' : ''}>${escapeHtml(v)}</option>`;
+  }
+  el.innerHTML = html;
+}
 
 function render() {
   const now = Date.now();
@@ -994,10 +1019,32 @@ function render() {
   const selGroup = $('group').value;
   const filterMode = $('filter').value;
   const q = $('q').value.trim().toLowerCase();
+  const langSel = $('langF').value;
+  const genreSel = $('genreF').value;
+  const catSel = $('catF').value;
+
+  // Build filter option lists from real channel/program data (preserving current selection).
+  const langSet = new Set(), genreSet = new Set(), catSet = new Set();
+  for (const c of state.channels) {
+    if (c.group) catSet.add(c.group);
+    for (const p of (c.programs || [])) {
+      if (p.cat) genreSet.add(p.cat);
+      if (p.lang) langSet.add(p.lang);
+      for (const t of (p.titles || [])) if (t.lang) langSet.add(t.lang);
+      for (const d of (p.descs || [])) if (d.lang) langSet.add(d.lang);
+    }
+  }
+  populateSelect('langF', [...langSet], 'All languages');
+  populateSelect('genreF', [...genreSet], 'All genres');
+  populateSelect('catF', [...catSet], 'All categories');
+
   let channels = state.channels;
   if (selGroup) channels = channels.filter(c => c.group === selGroup);
   if (filterMode === 'fav') channels = channels.filter(c => state.fav.has(favKey(c)));
   if (filterMode === 'epg') channels = channels.filter(c => c.epg);
+  if (langSel) channels = channels.filter(c => (c.programs || []).some(p => progHasLang(p, langSel)));
+  if (genreSel) channels = channels.filter(c => (c.programs || []).some(p => p.cat === genreSel));
+  if (catSel) channels = channels.filter(c => c.group === catSel);
   if (q) {
     channels = channels.filter(c => String(c.name || '').toLowerCase().includes(q) ||
       (c.programs || []).some(p => String(p.title || '').toLowerCase().includes(q)));
@@ -1917,6 +1964,7 @@ $('sample').addEventListener('click', sample);
 $('grab').addEventListener('click', autoGrab);
 $('group').addEventListener('change', () => { if (state.channels.length) render(); });
 $('filter').addEventListener('change', () => { if (state.channels.length) render(); });
+['langF', 'genreF', 'catF'].forEach(id => $(id).addEventListener('change', () => { if (state.channels.length) render(); }));
 $('q').addEventListener('input', () => { if (state.channels.length) render(); });
 $('window').addEventListener('change', () => { if (state.channels.length) render(); });
 $('m3u').addEventListener('keydown', e => { if (e.key === 'Enter') loadGuide(); });
