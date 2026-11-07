@@ -1416,9 +1416,15 @@ const server = http.createServer(async (req, res) => {
         const u = `https://api.mymemory.translated.net/get?q=${q}&langpair=autodetect|${to}`;
         const buf = await fetchBuffer(u, 12000);
         const data = JSON.parse(buf.toString('utf-8'));
+        const st = Number(data && data.responseStatus);
         const out = data && data.responseData && data.responseData.translatedText;
-        if (out && String(out).trim() && !/MYMEMORY WARNING/i.test(out)) {
-          return sendJSON(res, 200, { text: out, from: (data.responseData.detectedLanguage) || 'auto' });
+        const outS = String(out || '').trim();
+        // MyMemory returns 403 + a junk string ("PLEASE SELECT TWO DISTINCT
+        // LANGUAGES") when the auto-detected source == target. Treat non-200
+        // or obvious error strings as failure and fall through to Google.
+        if (st === 200 && outS && !/MYMEMORY WARNING/i.test(outS)
+            && !/PLEASE SELECT TWO DISTINCT LANGUAGES/i.test(outS)) {
+          return sendJSON(res, 200, { text: outS, from: (data.responseData.detectedLanguage) || 'auto' });
         }
       } catch (_) { /* fall through to google */ }
       // Fallback: Google translate (auto-detect).
