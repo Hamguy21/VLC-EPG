@@ -315,6 +315,7 @@ const LS_VPN = 'vlcEpgVpn';
 const LS_WEBUF = 'vlcEpgWebBuffer';
 const LS_MINI = 'vlcEpgMiniPlayer';
 const LS_MAXMINI = 'vlcEpgMaxMini';
+const LS_MINI_SIZE = 'vlcEpgMiniSize';
 
 function storageGet(key, fallback) {
   try { const value = localStorage.getItem(key); return value == null ? fallback : value; }
@@ -1449,8 +1450,10 @@ function makeMini(ch, id) {
   // cascade-placement so stacked minis don't fully overlap each other
   const n = state._minis.length;
   const off = Math.min(n * 30, 120);
-  const w = Math.min(320, window.innerWidth - 56);
-  const h = 200;
+  let w = 320, h = 200;
+  try { const s = JSON.parse(storageGet(LS_MINI_SIZE, '') || ''); if (s && s.w && s.h) { w = s.w; h = s.h; } } catch (_) {}
+  w = Math.min(Math.max(240, w), window.innerWidth - 16);
+  h = Math.min(Math.max(140, h), window.innerHeight - 16);
   const L = Math.max(8, window.innerWidth - w - 16 - off);
   const T = Math.max(8, window.innerHeight - h - 16 - off);
   Object.assign(wrap.style, { left: L + 'px', top: T + 'px', width: w + 'px', height: h + 'px', right: 'auto', bottom: 'auto' });
@@ -1556,7 +1559,7 @@ function wireMiniInteractions(inst) {
     let a = false, csx = 0, csy = 0, cox = 0, coy = 0, cow = 0, coh = 0;
     handle.addEventListener('pointerdown', e => { if (e.button !== 0) return; e.stopPropagation(); toLeftTop(); a = true; csx = e.clientX; csy = e.clientY; cox = parseFloat(box.style.left) || 0; coy = parseFloat(box.style.top) || 0; cow = box.offsetWidth; coh = box.offsetHeight; try { handle.setPointerCapture(e.pointerId); } catch (_) {} });
     handle.addEventListener('pointermove', e => { if (!a) return; const dx = e.clientX - csx, dy = e.clientY - csy; let L = cox, T = coy, W = cow, H = coh; if (mode === 'tl') { L=cox+dx; T=coy+dy; W=cow-dx; H=coh-dy; } else if (mode==='bl') { L=cox+dx; W=cow-dx; H=coh+dy; } else { W=cow+dx; H=coh+dy; } if (W<240){ L=cox+(cow-240); W=240; } if (H<140){ if(mode==='tl') T=coy+(coh-140); H=140; } if (L<0){ W+=L; L=0; } if (T<0){ H+=T; T=0; } if (L+W>window.innerWidth) W=window.innerWidth-L; if (T+H>window.innerHeight) H=window.innerHeight-T; if (W<240) W=240; if (H<140) H=140; box.style.left=L+'px'; box.style.top=T+'px'; box.style.width=W+'px'; box.style.height=H+'px'; });
-    const end = () => { a = false; };
+    const end = () => { a = false; try { storageSet(LS_MINI_SIZE, JSON.stringify({ w: box.offsetWidth, h: box.offsetHeight })); } catch (_) {} };
     handle.addEventListener('pointerup', end); handle.addEventListener('pointercancel', end);
   };
   bindCorner(rz, 'br'); bindCorner(bl, 'bl'); bindCorner(tl, 'tl');
