@@ -340,7 +340,7 @@
   .mini-player .mp-seek, .mini-player .mp-vol { accent-color:var(--accent); height:14px; cursor:pointer; }
   .mini-player .mp-vol { width:54px; }
   .mini-player .mp-resize-left, .mini-player .mp-resize-bl, .mini-player .mp-resize-tl,
-  .mini-player .mp-resize { position:absolute; width:16px; height:16px; z-index:3;
+  .mini-player .mp-resize { position:absolute; width:16px; height:16px; z-index:6;
     opacity:0; transition:opacity .12s; }
   .mini-player .mp-resize { right:0; bottom:0; cursor:nwse-resize; }
   .mini-player .mp-resize::after { content:''; position:absolute; right:3px; bottom:3px;
