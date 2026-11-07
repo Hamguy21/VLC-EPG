@@ -214,6 +214,9 @@
   .wp-chlist .wcl-name { flex:1; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
   .wp-loading { position:absolute; inset:44px 0 0; display:flex; align-items:center; justify-content:center;
     background:rgba(0,0,0,.45); z-index:4; pointer-events:none; }
+  .wp-err { position:absolute; inset:44px 0 0; display:flex; align-items:center; justify-content:center;
+    padding:24px; text-align:center; background:rgba(15,12,20,.72); z-index:4; pointer-events:none;
+    color:#ff9a9a; font-size:13px; line-height:1.5; }
   .wp-loading .spin { width:56px; height:56px; border:4px solid rgba(255,255,255,.18);
     border-top-color:var(--accent); border-radius:50%; animation:transspin .8s linear infinite; }
   .wp-loading .lbl { color:#cfd6e4; font-size:13px; margin-left:14px; }
@@ -609,6 +612,7 @@
   <div class="wp-loading" id="wpLoading" style="display:flex">
     <div class="spin"></div><div class="lbl">Buffering…</div>
   </div>
+  <div class="wp-err" id="wpError" style="display:none"></div>
   <div class="stats-overlay" id="statsOverlay" style="display:none"></div>
   <div class="dbg-overlay" id="dbgOverlay" style="display:none"></div>
   <div class="ctx-menu" id="ctxMenu" style="display:none"></div>
@@ -1587,6 +1591,7 @@ async function playWeb(ch) {
   $p.style.display = 'flex';
   if (state.fullscreen) applyWebFs(true);
   showLoader(true);
+  showPlayerErr('');
   dbgLog('web_open', { ch: ch.name });
   state._qf = 0;   // fresh channel -> clear ad-loop backoff counter
   if (!vid._volBound) { vid._volBound = true; vid.addEventListener('volumechange', () => dbgLog('volume', { v: vid.volume, muted: vid.muted })); }
@@ -1603,12 +1608,17 @@ async function playWeb(ch) {
   if (mp4Err) {
     dbgLog('hls_fallback', {});
     try { await startHlsPlay(ch); }
-    catch (e2) { showLoader(false); dbgLog('web_failed', { msg: e2.message }); setChErr(ch, e2.message); toast('Web player failed: ' + e2.message, true); closeWeb(); }
+    catch (e2) { dbgLog('web_failed', { msg: e2.message }); setChErr(ch, e2.message); showPlayerErr('⚠ ' + ch.name + ' failed — ' + e2.message); toast('Channel failed: ' + e2.message, true); }
   }
 }
 function showLoader(on) {
   const l = $('wpLoading'); if (l) l.style.display = on ? 'flex' : 'none';
   const v = $('wpVideo'); if (v) v.controls = !on;  // hide native spinner so only ours shows
+}
+function showPlayerErr(msg) {
+  showLoader(false);
+  const el = $('wpError');
+  if (el) { el.textContent = msg || ''; el.style.display = msg ? 'flex' : 'none'; }
 }
 function applyWebFs(on) {
   const el = $('webplayer');
