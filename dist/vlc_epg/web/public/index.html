@@ -1139,7 +1139,7 @@ function render() {
     const progs = (ch.programs || []).filter(p => p.stop > start && p.start < end);
     if (progs.length === 0) {
       const CH_W = 240; // sticky channel column width; start fallback to its right
-      html += `<div class="prog noinfo" style="left:${CH_W}px;width:${totalW - CH_W}px">${ch.epg ? 'No program in this window' : 'No EPG data — click the channel to play anyway'}</div>`;
+      html += `<div class="prog noinfo" data-idx="${idx}" style="left:${CH_W}px;width:${totalW - CH_W}px">${ch.epg ? 'No program in this window' : 'No EPG data — click the channel to play anyway'}</div>`;
     }
     for (const p of progs) {
       const left = CH_W + Math.max(0, (p.start - start) / 3600e3) * pxPerHour;
@@ -1210,6 +1210,24 @@ function render() {
         return;
       }
       if (ch) playFor(ch);
+    });
+  });
+
+  // click a no-EPG strip -> mini preview (web) or channel details; dblclick plays
+  stage.querySelectorAll('.prog.noinfo').forEach(el => {
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const idx = parseInt(el.dataset.idx, 10);
+      const ch = channels[idx];
+      if (!ch) return;
+      selectAt(idx);
+      if (state.miniPlayer && state.player === 'web' && ch.url) { openMiniPlayer(ch); }
+      else showChannelDetails(ch);
+    });
+    el.addEventListener('dblclick', (e) => {
+      e.stopPropagation();
+      const ch = channels[parseInt(el.dataset.idx, 10)];
+      if (ch) { const mi = state._minis.find(m => m.ch_url === ch.url); if (mi) { const src = mi.vid.src; post('/rekey', { from: mi.id, to: 'main' }).catch(() => {}); closeMiniKeepRelay(mi); if (src) showWebWithSrc(ch, src); else playFor(ch); } else playFor(ch); }
     });
   });
 
