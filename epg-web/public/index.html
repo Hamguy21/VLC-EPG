@@ -638,6 +638,7 @@ const LS_ADV = 'vlcEpgAdv';
 const LS_PROXY = 'vlcEpgProxy';
 const LS_USEPROXY = 'vlcEpgUseProxy';
 const LS_VPN = 'vlcEpgVpn';
+const LS_WEBUF = 'vlcEpgWebBuffer';
 
 function storageGet(key, fallback) {
   try { const value = localStorage.getItem(key); return value == null ? fallback : value; }
@@ -1132,6 +1133,7 @@ $('webBuffer').addEventListener('change', e => {
   if (v > 90) v = 90;
   state.webBuffer = v;
   e.target.value = v;
+  storageSet(LS_WEBUF, String(v));
   toast('Web player buffer: ' + v + ' s');
 });
 $('relayMode').addEventListener('change', e => {
@@ -1535,9 +1537,20 @@ async function runSpeedTest() {
     const up = (uBytes / (1024 * 1024)) / uSec * 8;
     window._lastMbps = down;
     dbgLog('speedtest', { down, up, lat });
+    // auto-apply a sensible web-player buffer tier for the measured download
+    const recBuffer = down >= 8 ? 30 : down >= 5 ? 24 : down >= 3.2 ? 18 : down >= 1.8 ? 12 : 8;
+    let applied = '';
+    if (recBuffer !== state.webBuffer) {
+      state.webBuffer = recBuffer;
+      storageSet(LS_WEBUF, String(recBuffer));
+      const wb = $('webBuffer'); if (wb) wb.value = recBuffer;
+      applied = ` · <span style="color:var(--accent)">auto-set buffer → ${recBuffer}s</span>`;
+    } else {
+      applied = ` · <span style="color:var(--accent)">buffer stays ${state.webBuffer}s</span>`;
+    }
     const f = m => m >= 10 ? m.toFixed(0) : m.toFixed(1);
-    out.innerHTML = `<span style="color:var(--text)"><b>${f(down)}</b> Mbps ↓ download</span> · <b>${f(up)}</b> Mbps ↑ upload · <b>${lat.toFixed(0)}</b> ms latency · latency/packet-loss degrade real quality`;
-    toast('Speed test done');
+    out.innerHTML = `<span style="color:var(--text)"><b>${f(down)}</b> Mbps ↓ download</span> · <b>${f(up)}</b> Mbps ↑ upload · <b>${lat.toFixed(0)}</b> ms latency${applied}`;
+    toast('Speed test done — buffer set to ' + state.webBuffer + 's');
   } catch (e) {
     out.textContent = 'Speed test failed: ' + e.message;
   }
@@ -2373,6 +2386,8 @@ state.vpn = storageGet(LS_VPN, '0') === '1';
 state.debug = storageGet(LS_DEBUG, '0') === '1';
 state.autoRestart = storageGet(LS_AR, '1') === '1';
 state.player = storageGet(LS_PLAYER, 'vlc') === 'web' ? 'web' : 'vlc';
+const _wb = parseInt(storageGet(LS_WEBUF, '30'), 10);
+state.webBuffer = (_wb >= 5 && _wb <= 90) ? _wb : 30;
 updatePlayerSeg();
 try { const nc = parseInt(storageGet(LS_NETCACHE, '3000'), 10); if (nc >= 300 && nc <= 10000) state.netCache = nc; } catch (_) {}
 refreshSavedDropdown('');
