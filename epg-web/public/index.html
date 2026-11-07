@@ -1913,6 +1913,17 @@ function showCtx(x, y, hasStats) {
     });
   });
 }
+// Clicking anywhere outside the context menu closes it; that first click is
+// swallowed so it doesn't also toggle play/pause. Subsequent clicks behave normally.
+$('webplayer').addEventListener('click', e => {
+  const menu = $('ctxMenu');
+  if (!menu || menu.style.display === 'none') return;
+  if (!menu.contains(e.target)) {
+    e.preventDefault();
+    e.stopPropagation();
+    menu.style.display = 'none';
+  }
+}, true);
 let statsTimer = null;
 let frameCount = 0;
 function toggleStats() {
