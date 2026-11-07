@@ -1402,8 +1402,8 @@ function startGridCell(idx, ch) {
   if (!s.id) s.id = 'grid' + (++state._gridSeq);
   syncGridCell(idx); // show spinner while loading
   post('/streammp4', { url: ch.url, buffer: state.webBuffer, scale: 'auto', id: s.id })
-    .then(r => { if (state._gridSlots[idx] === s && s.ch === ch) { s.url = r.url; s._codecs = r.codecs || null; s._lastT = 0; s._stallStart = Date.now(); syncGridCell(idx); } })
-    .catch(e => { s.ch = null; syncGridCell(idx); toast('Grid player ' + (idx+1) + ' failed: ' + e.message, true); });
+    .then(r => { if (state._gridSlots[idx] === s && s.ch === ch) { s.url = r.url; s._codecs = r.codecs || null; s._lastT = 0; s._stallStart = Date.now(); dbgLog('grid_start', { id: s.id, ch: ch.name }); syncGridCell(idx); } })
+    .catch(e => { s.ch = null; dbgLog('grid_fail', { id: s.id, msg: e.message }); syncGridCell(idx); toast('Grid player ' + (idx+1) + ' failed: ' + e.message, true); });
 }
 function assignGridChannel(ch) {
   let target = state._gridArmed;
@@ -1435,20 +1435,47 @@ function showGridList(q) {
   list.style.display = 'block';
 }
 function hideGridList() { const l = $('gridChList'); if (l) l.style.display = 'none'; }
+async function renderGridDbg(panel, s) {
+  let srv = [];
+  try { const j = await (await fetch('/debuglog')).json(); srv = j.events || []; } catch (_) {}
+  const mine = e => e && (e.id === s.id || String(e.msg || '').includes(s.id));
+  const rows = [...dbg.events.filter(mine), ...srv.filter(mine)].slice(-16);
+  const line = e => {
+    const lbl = e.k || e.msg || '?';
+    const rest = (e.code != null ? ' code=' + e.code : '') +
+      (e.msg && e.k ? ' ' + String(e.msg).slice(0, 90) : '') +
+      (e.ch ? ' ch=' + e.ch : '');
+    return escapeHtml(new Date(e.t).toLocaleTimeString() + ' ' + lbl + rest);
+  };
+  const cc = s._codecs || {};
+  const ccLine = (cc.video || '?') + ' / ' + (cc.audio || '?') + (cc.res ? ' @ ' + cc.res : '');
+  const body = rows.length
+    ? rows.map(e => '<div class="dbg-line">' + line(e) + '</div>').join('')
+    : '<div style="opacity:.6;padding:6px">No debug events recorded for this player yet</div>';
+  panel.innerHTML =
+    '<div style="font-weight:700;margin-bottom:4px">🐞 Player debug</div>' +
+    '<div>Relay id: <b>' + escapeHtml(s.id || '—') + '</b></div>' +
+    '<div>Codecs: ' + escapeHtml(ccLine) + '</div>' +
+    '<div style="max-height:150px;overflow:auto;font:10px/1.4 ui-monospace,Consolas,monospace;margin-top:6px;background:rgba(0,0,0,.25);border-radius:6px;padding:6px">' + body + '</div>' +
+    '<div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">' +
+      '<button class="stats-copy" data-copy="1">Copy</button>' +
+      '<button class="stats-copy" data-full="1">Full debug</button>' +
+    '</div>';
+  panel.querySelector('[data-copy]').onclick = () => {
+    const txt = rows.map(e => new Date(e.t).toLocaleTimeString() + ' ' + (e.k || e.msg || '?') + (e.code != null ? ' code=' + e.code : '') + (e.msg && e.k ? ' ' + e.msg : '')).join('\n');
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(() => toast('Debug copied')).catch(() => {});
+    else { const ta = document.createElement('textarea'); ta.value = txt; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); toast('Debug copied'); } catch (_) {} document.body.removeChild(ta); }
+  };
+  panel.querySelector('[data-full]').onclick = () => { panel.style.display = 'none'; openDbg(); };
+}
 function toggleGridDbg(idx) {
   const s = state._gridSlots[idx]; if (!s) return;
   const panel = s.el.querySelector('.gdbg-panel');
   if (!panel) return;
   if (panel.style.display === 'block') { panel.style.display = 'none'; return; }
-  const cc = s._codecs || {};
-  const ccLine = (cc.video || '?') + ' / ' + (cc.audio || '?') + (cc.res ? ' @ ' + cc.res : '');
-  panel.innerHTML =
-    '<div style="font-weight:700;margin-bottom:4px">🐞 Player debug</div>' +
-    '<div>Relay id: <b>' + escapeHtml(s.id || '—') + '</b></div>' +
-    '<div>Codecs: ' + escapeHtml(ccLine) + '</div>' +
-    '<div style="margin-top:6px"><button class="stats-copy" data-full="1">Open full debug</button></div>';
-  panel.querySelector('[data-full]').onclick = () => { panel.style.display='none'; openDbg(); };
   panel.style.display = 'block';
+  panel.innerHTML = '<div style="padding:8px;opacity:.7">Loading debug…</div>';
+  renderGridDbg(panel, s);
 }
 
 function gridStallWatch() {
