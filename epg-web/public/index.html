@@ -510,10 +510,16 @@
       </label>
     </div>
     <div class="p-row adv">
-      <span class="p-lbl">Stream proxy (optional) — HTTP proxy for the relay, e.g. http://127.0.0.1:1080</span>
+      <label class="fmt-opt" style="display:inline-flex;gap:8px">
+        <input type="checkbox" id="proxyEnableMode"> Use proxy for geo-blocked streams
+      </label>
+      <span class="p-lbl">Stream proxy (HTTP) — e.g. http://127.0.0.1:1080</span>
       <input type="text" id="proxySel" placeholder="http://127.0.0.1:1080" style="width:100%;padding:7px 10px;border-radius:8px;border:1px solid var(--border);background:var(--panel2);color:var(--text);font-size:13px">
       <button class="btn ghost small" id="probeProxyBtn" style="margin-top:6px">⟳ Probe public proxies</button>
       <select id="proxyResults" class="pref-lang" style="display:none;margin-top:6px"></select>
+      <label class="fmt-opt" style="display:inline-flex;gap:8px;margin-top:6px">
+        <input type="checkbox" id="vpnMode"> I use my system VPN instead (bypass HTTP proxy)
+      </label>
       <div id="proxyHint" style="margin-top:4px;font-size:11px;color:var(--muted)"></div>
     </div>
     <div class="p-row adv">
@@ -608,7 +614,7 @@
 <script>
 const $ = id => document.getElementById(id);
 const stage = $('stage');
-const state = { channels: [], groups: [], now: Date.now(), fav: new Set(), current: null, dfmt: 'DMY', sel: null, view: [], lang: 'en', translate: false, fullscreen: false, netCache: 3000, relay: false, player: 'vlc', webBuffer: 30, hw: false, quality: 'auto', debug: false, autoRestart: true, chno: true, loadLast: true, h12: false, adv: false, proxy: '' };
+const state = { channels: [], groups: [], now: Date.now(), fav: new Set(), current: null, dfmt: 'DMY', sel: null, view: [], lang: 'en', translate: false, fullscreen: false, netCache: 3000, relay: false, player: 'vlc', webBuffer: 30, hw: false, quality: 'auto', debug: false, autoRestart: true, chno: true, loadLast: true, h12: false, adv: false, useProxy: false, vpn: false, proxy: '' };
 let timer = null, toastTimer = null, activeLoadId = 0;
 const LS_SOURCES = 'vlcEpgSources';
 const LS_FAV = 'vlcEpgFavorites';
@@ -630,6 +636,8 @@ const LS_LASTON = 'vlcEpgLoadLast';
 const LS_H12 = 'vlcEpg12h';
 const LS_ADV = 'vlcEpgAdv';
 const LS_PROXY = 'vlcEpgProxy';
+const LS_USEPROXY = 'vlcEpgUseProxy';
+const LS_VPN = 'vlcEpgVpn';
 
 function storageGet(key, fallback) {
   try { const value = localStorage.getItem(key); return value == null ? fallback : value; }
@@ -979,6 +987,9 @@ function openSettings() {
   $('h12Mode').checked = state.h12;
   $('advMode').checked = state.adv;
   $('proxySel').value = state.proxy || '';
+  $('proxyEnableMode').checked = state.useProxy;
+  $('vpnMode').checked = state.vpn;
+  updateProxyUI();
   const _panel = document.querySelector('#overlay .panel'); if (_panel) _panel.classList.toggle('adv-on', state.adv);
   $('dbgMode').checked = state.debug;
   $('arMode').checked = state.autoRestart;
@@ -1038,6 +1049,28 @@ $('proxySel').addEventListener('change', e => {
   state.proxy = String(e.target.value || '').trim();
   storageSet(LS_PROXY, state.proxy);
   toast(state.proxy ? 'Proxy set: ' + state.proxy : 'Proxy cleared');
+});
+function effectiveProxy() { return (state.useProxy && !state.vpn) ? state.proxy : ''; }
+function updateProxyUI() {
+  const use = state.useProxy && !state.vpn;
+  const inp = $('proxySel'), btn = $('probeProxyBtn'), sel = $('proxyResults'), hint = $('proxyHint');
+  if (!inp) return;
+  inp.disabled = !use; btn.disabled = !use; sel.disabled = !use;
+  if (state.vpn) hint.textContent = 'Your system VPN routes the traffic — no HTTP proxy applied.';
+  else if (!state.useProxy) hint.textContent = 'Proxy is off. Enable "Use proxy" to route geo-blocked streams through it.';
+  else hint.textContent = 'Proxy enabled — streams will go through ' + (state.proxy || '(set one below)');
+}
+$('proxyEnableMode').addEventListener('change', e => {
+  state.useProxy = e.target.checked;
+  storageSet(LS_USEPROXY, state.useProxy ? '1' : '0');
+  updateProxyUI();
+  toast('Proxy ' + (state.useProxy ? 'enabled' : 'disabled'));
+});
+$('vpnMode').addEventListener('change', e => {
+  state.vpn = e.target.checked;
+  storageSet(LS_VPN, state.vpn ? '1' : '0');
+  updateProxyUI();
+  toast('Using system VPN ' + (state.vpn ? 'on' : 'off'));
 });
 $('probeProxyBtn').addEventListener('click', async () => {
   const sel = $('proxyResults'), hint = $('proxyHint'), btn = $('probeProxyBtn');
@@ -1578,7 +1611,7 @@ function dbgLog(k, o) {
 // Start the native MP4 relay and attach the video + auto-reconnect monitor.
 async function startMp4(ch, quiet, tc) {
   const vid = $('wpVideo');
-  const r4 = await post('/streammp4', { url: ch.url, buffer: state.webBuffer, tc: !!tc, proxy: state.proxy });
+  const r4 = await post('/streammp4', { url: ch.url, buffer: state.webBuffer, tc: !!tc, proxy: effectiveProxy() });
   if (r4.codecs) window._codecs = r4.codecs;
   dbgLog(tc ? 'mp4_relay_tc' : 'mp4_relay', { codecs: r4.codecs || null, buffer: state.webBuffer, tc: !!tc });
   vid._checkedEnded = false; vid._stopStall = false;
@@ -1691,7 +1724,7 @@ function monitorStall(ch, vid) {
 }
 async function startHlsPlay(ch) {
   const vid = $('wpVideo');
-  const r = await post('/stream', { url: ch.url, proxy: state.proxy });
+  const r = await post('/stream', { url: ch.url, proxy: effectiveProxy() });
   const src = r.playUrl;
   if (window.Hls && Hls.isSupported()) {
     hlsPlayer = new Hls({ maxBufferLength: 30, enableWorker: true });
@@ -2334,6 +2367,8 @@ state.loadLast = storageGet(LS_LASTON, '1') === '1';
 state.h12 = storageGet(LS_H12, '0') === '1';
 state.adv = storageGet(LS_ADV, '0') === '1';
 state.proxy = storageGet(LS_PROXY, '');
+state.useProxy = storageGet(LS_USEPROXY, '0') === '1';
+state.vpn = storageGet(LS_VPN, '0') === '1';
 state.debug = storageGet(LS_DEBUG, '0') === '1';
 state.autoRestart = storageGet(LS_AR, '1') === '1';
 state.player = storageGet(LS_PLAYER, 'vlc') === 'web' ? 'web' : 'vlc';
