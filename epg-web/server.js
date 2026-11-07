@@ -808,94 +808,113 @@ function stopPlay() {
 /* ---------- MP4 relay (blob-free web playback) ---------- */
 // Re-streams the upstream as a fragmented MP4 that a native <video> can play
 // progressively without MediaSource/blob (works even where CSP blocks blob:).
-let mp4Child = null;
-let mp4File = null;
-let mp4Slug = null;
-let mp4BufferMs = 30000;
-let mp4Head = [];   // accumulated ffmpeg stderr (all) for codec parsing
-let mp4LiveMbps = 0;  // measured delivery throughput to the web client (Mbps)
-let mp4Eof = false;    // set when the feed ended early (clean EOF shortly after start)
-let mp4Watch = null;    // stall-watchdog interval
-let mp4LastSize = 0;
-let mp4LastGrow = 0;
-let mp4TStart = 0;
-let mp4ForceFresh = false; // force a fresh session on watchdog restart
+/* ---------- MP4 relay (blob-free web playback) ---------- */
+// Re-streams the upstream as a fragmented MP4 that a native <video> can play
+// progressively without MediaSource/blob (works even where CSP blocks blob:).
+// Multiple relays run in parallel, each keyed by an id ('main' = the main
+// player, 'miniN' = mini players). Each keeps its own child/file/buffer,
+// watchdog, and bitrate estimator.
+const mp4Relays = new Map();
+
 let serverEvents = []; // ring buffer of server-side diagnostic events
 function sev(msg, extra) {
   try { serverEvents.push(Object.assign({ t: Date.now(), msg }, extra || {})); if (serverEvents.length > 400) serverEvents.shift(); } catch (_) {}
 }
 
-// Shared bitrate estimate (bytes/sec) of the relay output, used to size the
-// pre-roll and buffer windows in wall-clock terms.
-const brEstimator = { bytes: 0, t0: 0, bps: 0 };
-function brReset() { brEstimator.bytes = 0; brEstimator.t0 = 0; brEstimator.bps = 0; }
-function brSample(size) {
-  const now = Date.now();
-  if (!brEstimator.t0) { brEstimator.t0 = now; brEstimator.bytes = size; return; }
-  const dt = (now - brEstimator.t0) / 1000;
-  if (dt >= 1) {
-    brEstimator.bps = Math.max(50000, (size - brEstimator.bytes) / dt);
-    brEstimator.t0 = now; brEstimator.bytes = size;
+function createBr() {
+  const e = { bytes: 0, t0: 0, bps: 0 };
+  return {
+    reset() { e.bytes = 0; e.t0 = 0; e.bps = 0; },
+    sample(size) {
+      const now = Date.now();
+      if (!e.t0) { e.t0 = now; e.bytes = size; return; }
+      const dt = (now - e.t0) / 1000;
+      if (dt >= 1) { e.bps = Math.max(50000, (size - e.bytes) / dt); e.t0 = now; e.bytes = size; }
+    },
+    bps() { return e.bps || 400000; },
+  };
+}
+function newRelayEntry(id, url, opts) {
+  return {
+    id, url, opts,
+    child: null, file: null, slug: null, bufferMs: 30000,
+    head: [], liveMbps: 0, eof: false,
+    watch: null, lastSize: 0, lastGrow: 0, tStart: 0,
+    forceFresh: false, br: createBr(),
+  };
+}
+function killRelay(r) {
+  if (r.watch) { clearInterval(r.watch); r.watch = null; }
+  if (r.child) { try { r.child.kill(); } catch (_) {} r.child = null; }
+  if (r.file) { try { fs.rmSync(r.file, { force: true }); } catch (_) {} r.file = null; }
+}
+function stopMp4Relay(id) {
+  if (id == null) {
+    for (const rr of mp4Relays.values()) killRelay(rr);
+    mp4Relays.clear();
+    return;
   }
+  const key = String(id);
+  const r = mp4Relays.get(key);
+  if (r) { killRelay(r); mp4Relays.delete(key); }
 }
-function brBps() { return brEstimator.bps || 400000; }
-function stopMp4Relay() {
-  if (mp4Watch) { clearInterval(mp4Watch); mp4Watch = null; }
-  if (mp4Child) { try { mp4Child.kill(); } catch (_) {} mp4Child = null; }
-  if (mp4File) { try { fs.rmSync(mp4File, { force: true }); } catch (_) {} mp4File = null; }
-  mp4Slug = null;
-  mp4LiveMbps = 0;
-  mp4Eof = false;
+function findRelayBySlug(slug) {
+  for (const r of mp4Relays.values()) if (r.slug === slug) return r;
+  return null;
 }
-// Server-side stall watchdog: if the relay output stops growing for ~10s
-// (upstream hang) after warm-up, kill it and pre-emptively restart with a
-// fresh session so recovery is faster and zombies don't linger.
-function startMp4Watchdog(url, opts) {
-  clearInterval(mp4Watch);
-  mp4LastSize = 0; mp4LastGrow = Date.now();
-  mp4Watch = setInterval(() => {
-    if (!mp4Child) { clearInterval(mp4Watch); mp4Watch = null; return; }
-    let sz = 0; try { sz = fs.statSync(mp4File).size; } catch (_) {}
-    if (sz !== mp4LastSize) { mp4LastSize = sz; mp4LastGrow = Date.now(); return; }
-    const stuck = Date.now() - mp4LastGrow;
-    if (stuck > 10000 && Date.now() - mp4TStart > 20000) {
-      sev('watchdog_stall', { slug: mp4Slug, stuckMs: stuck });
-      clearInterval(mp4Watch); mp4Watch = null;
-      mp4ForceFresh = true;
-      stopMp4Relay();
-      startMp4Relay(url, opts)
-        .then(() => sev('watchdog_restarted', {}))
-        .catch(e => sev('watchdog_restart_failed', { msg: e.message }));
+// Server-side stall watchdog for one relay: if its output stops growing for
+// ~10s (upstream hang) after warm-up, kill and restart it fresh.
+function startMp4Watchdog(id, url, opts, r) {
+  clearInterval(r.watch);
+  r.lastSize = 0; r.lastGrow = Date.now();
+  r.watch = setInterval(() => {
+    if (!r.child) { clearInterval(r.watch); r.watch = null; return; }
+    let sz = 0; try { sz = fs.statSync(r.file).size; } catch (_) {}
+    if (sz !== r.lastSize) { r.lastSize = sz; r.lastGrow = Date.now(); return; }
+    const stuck = Date.now() - r.lastGrow;
+    if (stuck > 10000 && Date.now() - r.tStart > 20000) {
+      sev('watchdog_stall', { slug: r.slug, id, stuckMs: stuck });
+      clearInterval(r.watch); r.watch = null;
+      r.forceFresh = true;
+      stopMp4Relay(id);
+      startMp4Relay(url, Object.assign({}, opts, { id }))
+        .then(() => sev('watchdog_restarted', { id }))
+        .catch(e => sev('watchdog_restart_failed', { id, msg: e.message }));
     }
   }, 2000);
 }
 async function startMp4Relay(url, opts) {
-  if (/pluto\.tv/i.test(url)) { try { const f = await plutoFreshUrl(url, mp4ForceFresh); mp4ForceFresh = false; if (f) url = f; } catch (_) {} }
-  mp4TStart = Date.now();
+  const id = String(opts && opts.id ? opts.id : 'main');
+  const o = opts || {};
+  stopMp4Relay(id);
+  const slug = 'm' + Date.now().toString(36) + '-' + id.replace(/[^a-z0-9]/gi, '').slice(-4) || 'main';
+  const r = newRelayEntry(id, url, o);
+  r.slug = slug;
+  mp4Relays.set(id, r);
+  if (/pluto\.tv/i.test(url)) { try { const f = await plutoFreshUrl(url, r.forceFresh); r.forceFresh = false; if (f) url = f; } catch (_) {} }
+  r.tStart = Date.now();
   const ff = await ensureFFmpeg();
   return new Promise((resolve, reject) => {
-    if (!ff) return reject(new Error('FFmpeg is not available on this system'));
-    stopMp4Relay();
-    const slug = 'm' + Date.now().toString(36);
+    if (!ff) { mp4Relays.delete(id); return reject(new Error('FFmpeg is not available on this system')); }
     const dir = path.join(RELAY_DIR, slug);
-    fs.mkdirSync(dir, { recursive: true });
     const file = path.join(dir, 'live.mp4');
-    const tStart = Date.now();
-    const bufferMs = opts && opts.bufferMs ? Math.min(90000, Math.max(5000, +opts.bufferMs)) : 30000;
-    const preRollSec = 10;   // buffer this much before starting playback
-    brReset();
-    mp4Head = [];
-    mp4LiveMbps = 0;
-    mp4Eof = false;
+    fs.mkdirSync(dir, { recursive: true });
+    const bufferMs = o.bufferMs ? Math.min(90000, Math.max(5000, +o.bufferMs)) : 30000;
+    r.bufferMs = bufferMs;
+    const preRollSec = 10;
+    r.br.reset();
+    r.head = [];
+    r.liveMbps = 0;
+    r.eof = false;
     const codecs = () => {
-      const text = mp4Head.join('\n');
+      const text = r.head.join('\n');
       let video = '', audio = '', res = '';
       const vm = text.match(/Video:\s*([^\s,]+)/); if (vm) video = vm[1];
       const am = text.match(/Audio:\s*([^\s,]+)/); if (am) audio = am[1];
       const rm = text.match(/(\d{2,5})x(\d{2,5})/); if (rm) res = rm[1] + '×' + rm[2];
       return { video, audio, res };
     };
-    const tc = !!(opts && opts.tc);   // transcode to h264+aac for compatibility
+    const tc = !!o.tc;
     const args = [
       '-hide_banner', '-loglevel', 'info', '-nostdin',
       '-user_agent', DEFAULT_UA,
@@ -905,54 +924,49 @@ async function startMp4Relay(url, opts) {
       '-i', url,
     ];
     if (tc) {
-      args.push('-map', '0:v:0', '-map', '0:a:0', '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28',
-        '-c:a', 'aac', '-b:a', '128k');
-    } else if (opts.noBsf) {
-      args.push('-c', 'copy'); // non-AAC audio (e.g. MP2): aac_adtstoasc bsf unsupported
+      args.push('-map', '0:v:0', '-map', '0:a:0', '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28', '-c:a', 'aac', '-b:a', '128k');
+    } else if (o.noBsf) {
+      args.push('-c', 'copy');
     } else {
-      args.push('-c', 'copy', '-bsf:a', 'aac_adtstoasc'); // remux HLS AAC -> MP4
+      args.push('-c', 'copy', '-bsf:a', 'aac_adtstoasc');
     }
     args.push('-fflags', '+genpts+flush_packets+discardcorrupt', '-f', 'mp4',
       '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
       '-frag_duration', '500000', file);
     const childEnv = { ...process.env };
-    if (opts.proxy) { childEnv.http_proxy = opts.proxy; childEnv.https_proxy = opts.proxy; childEnv.all_proxy = opts.proxy; }
+    if (o.proxy) { childEnv.http_proxy = o.proxy; childEnv.https_proxy = o.proxy; childEnv.all_proxy = o.proxy; }
     let child;
     try { child = spawn(ff, args, { detached: false, env: childEnv }); }
-    catch (e) { return reject(new Error('failed to start FFmpeg: ' + e.message)); }
-    mp4Child = child; mp4File = file; mp4Slug = slug; mp4BufferMs = bufferMs;
-    sev('relay_start', { slug, url });
+    catch (e) { mp4Relays.delete(id); return reject(new Error('failed to start FFmpeg: ' + e.message)); }
+    r.child = child; r.file = file;
+    sev('relay_start', { id, slug, url });
     const errLines = [];
-    const headLines = [];
+    let settled = false;
+    const fail = msg => { if (settled) return; settled = true; stopMp4Relay(id); const er = new Error(msg); er.status = 422; reject(er); };
+    const done = () => { if (settled) return; settled = true; resolve({ url: `http://127.0.0.1:${PORT}/relaymp4/${slug}/live.mp4`, relay: true, slug, id, codecs: codecs() }); startMp4Watchdog(id, url, o, r); };
     child.stderr.on('data', d => {
       const s = String(d);
-      if (mp4Head.join('').length < 200000) mp4Head.push(s); // keep all for codec parse
+      if (r.head.join('').length < 200000) r.head.push(s);
       errLines.push(s); if (errLines.length > 40) errLines.shift();
     });
-    let settled = false;
-    const fail = msg => { if (settled) return; settled = true; stopMp4Relay(); const er = new Error(msg); er.status = 422; reject(er); };
-    const done = () => { if (settled) return; settled = true; resolve({ url: `http://127.0.0.1:${PORT}/relaymp4/${slug}/live.mp4`, relay: true, slug, codecs: codecs() }); startMp4Watchdog(url, opts); };
-    child.on('error', e => { sev('relay_error', { slug, msg: e.message }); fail('FFmpeg failed to start: ' + e.message); });
+    child.on('error', e => { sev('relay_error', { id, slug, msg: e.message }); fail('FFmpeg failed to start: ' + e.message); });
     child.on('exit', code => {
-      if (mp4Child === child) mp4Child = null;
-      const ms = Date.now() - tStart;
-      sev('relay_exit', { slug, code, ms });
-      if (code !== 0) sev('ffmpeg_exit_err', { slug, code, tail: errLines.join('\n').slice(-1200) });
-      // Clean exit shortly after start = the upstream feed ended (EOF), not a
-      // network blip. Flag it so the client can stop the reconnect loop.
-      if (code === 0 && ms < 30000) { mp4Eof = true; sev('relay_eof', { slug, ms }); }
-      setTimeout(() => { if (!fs.existsSync(file) || fs.statSync(file).size < 4096) fail('FFmpeg exited (code ' + code + ') ' + errLines.join(' ').slice(-200)); }, 60);
+      if (r.child === child) r.child = null;
+      const ms = Date.now() - r.tStart;
+      sev('relay_exit', { id, slug, code, ms });
+      if (code !== 0) sev('ffmpeg_exit_err', { id, slug, code, tail: errLines.join('\n').slice(-1200) });
+      if (code === 0 && ms < 30000) { r.eof = true; sev('relay_eof', { id, slug, ms }); }
+      setTimeout(() => { if (!fs.existsSync(file) || fs.statSync(file).size < 4096) { fail('FFmpeg exited (code ' + code + ') ' + errLines.join(' ').slice(-200)); } }, 60);
     });
-    const t0 = Date.now();
     const wait = setInterval(() => {
-      const elapsed = Date.now() - tStart;
+      const elapsed = Date.now() - r.tStart;
       let sz = 0; try { sz = fs.statSync(file).size; } catch (_) {}
-      brSample(sz);
-      const preRollBytes = brBps() * preRollSec;
-      const ready = sz >= Math.max(262144, Math.min(preRollBytes, brBps() * 60));
+      r.br.sample(sz);
+      const preRollBytes = r.br.bps() * preRollSec;
+      const ready = sz >= Math.max(262144, Math.min(preRollBytes, r.br.bps() * 60));
       const limit = tc ? 120000 : 60000;
       if (ready) { clearInterval(wait); done(); }
-      else if (elapsed > limit) { clearInterval(wait); const m = 'MP4 relay timed out: ' + errLines.join(' ').slice(-200); sev('relay_timeout', { slug, msg: m }); fail(m); }
+      else if (elapsed > limit) { clearInterval(wait); const m = 'MP4 relay timed out: ' + errLines.join(' ').slice(-200); sev('relay_timeout', { id, slug, msg: m }); fail(m); }
     }, 300);
   });
 }
@@ -975,7 +989,7 @@ function streamGrowingFile(res, file, opts) {
   res.writeHead(200, { 'Content-Type': 'video/mp4', 'Transfer-Encoding': 'chunked', 'Cache-Control': 'no-store' });
 
   const recvBytes = () => samples.length ? samples[samples.length - 1].size : 0;
-  const bps = () => brBps();
+  const bps = () => (o.r ? o.r.br.bps() : 400000);
 
   // Effective delivery throughput to the client (network speed detector).
   const noteOut = n => {
@@ -983,7 +997,7 @@ function streamGrowingFile(res, file, opts) {
     const now = Date.now();
     if (!outT0) outT0 = now;
     const dt = (now - outT0) / 1000;
-    if (dt >= 2) { outBps = outBytes / dt; outT0 = now; outBytes = 0; mp4LiveMbps = outBps / 125000; }
+    if (dt >= 2) { outBps = outBytes / dt; outT0 = now; outBytes = 0; if (o.r) o.r.liveMbps = outBps / 125000; }
   };
   const networkCapSec = () => {
     if (!outBps) return targetSec;
@@ -1532,29 +1546,47 @@ const server = http.createServer(async (req, res) => {
 
     // Current relay codec info (for Stats-for-nerds).
     if (p === '/relayinfo' && req.method === 'GET') {
-      const text = mp4Head.join('\n');
-      let video = '', audio = '', resStr = '';
-      const vm = text.match(/Video:\s*([^\s,]+)/); if (vm) video = vm[1];
-      const am = text.match(/Audio:\s*([^\s,]+)/); if (am) audio = am[1];
-      const rm = text.match(/(\d{2,5})x(\d{2,5})/); if (rm) resStr = rm[1] + '×' + rm[2];
-      return sendJSON(res, 200, { active: !!mp4Child, ended: mp4Eof, connectionMbps: mp4LiveMbps, codecs: { video, audio, res: resStr } });
+      const list = [...mp4Relays.values()].map(r => {
+        const text = r.head.join('\n');
+        let video = '', audio = '', resStr = '';
+        const vm = text.match(/Video:\s*([^\s,]+)/); if (vm) video = vm[1];
+        const am = text.match(/Audio:\s*([^\s,]+)/); if (am) audio = am[1];
+        const rm = text.match(/(\d{2,5})x(\d{2,5})/); if (rm) resStr = rm[1] + '×' + rm[2];
+        return { id: r.id, slug: r.slug, active: !!r.child, ended: r.eof, connectionMbps: r.liveMbps, codecs: { video, audio, res: resStr } };
+      });
+      const main = list.find(x => x.id === 'main') || { active: false, ended: false, connectionMbps: 0, codecs: { video: '', audio: '', res: '' } };
+      return sendJSON(res, 200, Object.assign({}, main, { relays: list }));
     }
 
     // Start an FFmpeg MP4 relay (native, blob-free web playback).
     if (p === '/streammp4' && req.method === 'POST') {
       if (req.headers['content-type']?.split(';')[0].trim() !== 'application/json')
         throw Object.assign(new Error('content-type must be application/json'), { status: 415 });
-      const { url, buffer, tc, proxy } = parseJSON(await readBody(req));
+      const { url, buffer, tc, proxy, id } = parseJSON(await readBody(req));
       if (typeof url !== 'string' || !url.trim()) throw Object.assign(new Error('url is required'), { status: 400 });
-      const r = await startMp4WithRetry(url, { bufferMs: (Number(buffer) || 30) * 1000, tc: !!tc, proxy: proxy || '' });
+      const r = await startMp4WithRetry(url, { bufferMs: (Number(buffer) || 30) * 1000, tc: !!tc, proxy: proxy || '', id: id || 'main' });
       return sendJSON(res, 200, r);
     }
 
     if (p === '/stop' && req.method === 'POST') {
       if (req.headers['content-type']?.split(';')[0].trim() !== 'application/json')
         throw Object.assign(new Error('content-type must be application/json'), { status: 415 });
-      await readBody(req);
+      const { id } = parseJSON(await readBody(req)) || {};
+      if (id) { stopMp4Relay(id); return sendJSON(res, 200, { stopped: true }); }
       return sendJSON(res, 200, stopPlay());
+    }
+
+    // Transfer a relay to a new key (seamless handoff without relaunch).
+    if (p === '/rekey' && req.method === 'POST') {
+      if (req.headers['content-type']?.split(';')[0].trim() !== 'application/json') throw Object.assign(new Error('content-type must be application/json'), { status: 415 });
+      const { from, to } = parseJSON(await readBody(req)) || {};
+      const rf = mp4Relays.get(String(from));
+      if (!rf) return sendJSON(res, 404, { error: 'no such relay' });
+      if (rf.watch) clearInterval(rf.watch);
+      mp4Relays.delete(String(from));
+      rf.id = String(to); mp4Relays.set(String(to), rf);
+      startMp4Watchdog(String(to), rf.url, rf.opts, rf);
+      return sendJSON(res, 200, { ok: true });
     }
 
     if (p === '/grab' && req.method === 'POST') {
@@ -1649,7 +1681,9 @@ const server = http.createServer(async (req, res) => {
       const rel = p.slice('/relaymp4/'.length);
       const abs = path.join(RELAY_DIR, path.normalize(rel));
       if (!abs.startsWith(RELAY_DIR + path.sep) || !fs.existsSync(abs)) return sendJSON(res, 404, { error: 'not found' });
-      streamGrowingFile(res, abs, { preRollSec: 10, targetSec: mp4BufferMs / 1000 });
+      const slug0 = rel.split('/')[0];
+      const entry = findRelayBySlug(slug0);
+      streamGrowingFile(res, abs, { preRollSec: 10, targetSec: (entry ? entry.bufferMs : 30000) / 1000, r: entry });
       return;
     }
 

@@ -288,7 +288,7 @@
 <script>
 const $ = id => document.getElementById(id);
 const stage = $('stage');
-const state = { channels: [], groups: [], now: Date.now(), fav: new Set(), current: null, dfmt: 'DMY', sel: null, view: [], lang: 'en', translate: false, fullscreen: false, netCache: 3000, relay: false, player: 'vlc', webBuffer: 30, hw: false, quality: 'auto', debug: false, autoRestart: true, chno: true, loadLast: true, h12: false, adv: false, useProxy: false, vpn: false, proxy: '', miniPlayer: true, maxMini: 1, _minis: [] };
+const state = { channels: [], groups: [], now: Date.now(), fav: new Set(), current: null, dfmt: 'DMY', sel: null, view: [], lang: 'en', translate: false, fullscreen: false, netCache: 3000, relay: false, player: 'vlc', webBuffer: 30, hw: false, quality: 'auto', debug: false, autoRestart: true, chno: true, loadLast: true, h12: false, adv: false, useProxy: false, vpn: false, proxy: '', miniPlayer: true, maxMini: 1, _minis: [], _miniSeq: 0 };
 let timer = null, toastTimer = null, activeLoadId = 0;
 const LS_SOURCES = 'vlcEpgSources';
 const LS_FAV = 'vlcEpgFavorites';
@@ -1203,6 +1203,7 @@ function render() {
       const mi = state._minis.find(m => m.ch_url === ch.url);
       if (mi) {
         const src = mi.vid.src;
+        post('/rekey', { from: mi.id, to: 'main' }).catch(() => {});
         closeMiniKeepRelay(mi);
         if (src) showWebWithSrc(ch, src); else playFor(ch);
         dbgLog('mini_to_web', { ch: ch.name });
@@ -1383,10 +1384,9 @@ async function openMiniPlayer(ch) {
   while (state._minis.length >= max) closeMini(state._minis[0]);
   const inst = makeMini(ch);
   state._minis.push(inst);
-  post('/stop', {}).catch(() => {});
   (async () => {
     try {
-      const r4 = await post('/streammp4', { url: ch.url, buffer: state.webBuffer, tc: false, proxy: effectiveProxy() });
+      const r4 = await post('/streammp4', { url: ch.url, buffer: state.webBuffer, tc: false, proxy: effectiveProxy(), id: inst.id });
       if (inst.destroyed) return;
       if (!r4 || !r4.url) throw new Error('no stream returned');
       inst.src = r4.url;
@@ -1412,7 +1412,7 @@ const MINI_TPL = `
   </div>
   <div class="mp-resize"></div><div class="mp-resize-bl"></div><div class="mp-resize-tl"></div>`;
 
-function makeMini(ch) {
+function makeMini(ch, id) {
   const wrap = document.createElement('div');
   wrap.className = 'mini-player';
   wrap.innerHTML = MINI_TPL;
@@ -1425,7 +1425,7 @@ function makeMini(ch) {
   const T = Math.max(8, window.innerHeight - h - 16 - off);
   Object.assign(wrap.style, { left: L + 'px', top: T + 'px', width: w + 'px', height: h + 'px', right: 'auto', bottom: 'auto' });
   $('miniZone').appendChild(wrap);
-  const inst = { el: wrap, vid: wrap.querySelector('video'), ch, ch_url: ch.url, src: null, destroyed: false };
+  const inst = { id: id || ('mini' + (++state._miniSeq)), el: wrap, vid: wrap.querySelector('video'), ch, ch_url: ch.url, src: null, destroyed: false };
   wrap.querySelector('.mp-title').textContent = ch.name;
   wireMiniControls(inst);
   wireMiniInteractions(inst);
@@ -1449,7 +1449,7 @@ function wireMiniClose(inst) {
 function closeMini(inst) {
   if (!inst || inst.destroyed) return;
   inst.destroyed = true;
-  post('/stop', {}).catch(() => {});
+  post('/stop', { id: inst.id }).catch(() => {});
   inst.el.remove();
   const i = state._minis.indexOf(inst); if (i >= 0) state._minis.splice(i, 1);
 }
@@ -1502,13 +1502,13 @@ function wireMiniInteractions(inst) {
 }
 
 // Show a mini for a channel using an existing relay URL (handoff, no relaunch).
-function openMiniWithSrc(ch, src) {
+function openMiniWithSrc(ch, src, id) {
   if (!ch || !ch.url) return;
   const existing = state._minis.find(m => m.ch_url === ch.url);
   if (existing) { bringMiniFront(existing); if (src && existing.vid.getAttribute('src') !== src) { existing.vid.src = src; existing.vid.play().catch(() => {}); } return; }
   const max = Math.max(1, state.maxMini || 1);
   while (state._minis.length >= max) closeMini(state._minis[0]);
-  const inst = makeMini(ch); state._minis.push(inst);
+  const inst = makeMini(ch, id); state._minis.push(inst);
   if (src) { inst.src = src; inst.vid.src = src; inst.vid.onloadedmetadata = () => inst.vid.play().catch(() => {}); }
 }
 
@@ -1524,8 +1524,11 @@ $('wpMini').addEventListener('click', () => {
   const ch = state._cur;
   $('webplayer').style.display = 'none';
   stopVideoEl($('wpVideo'));
-  if (src) openMiniWithSrc(ch, src);
-  else if (ch) openMiniPlayer(ch);
+  if (src && ch) {
+    const nid = 'mini' + (++state._miniSeq);
+    post('/rekey', { from: 'main', to: nid }).catch(() => {});
+    openMiniWithSrc(ch, src, nid);
+  } else if (ch) openMiniPlayer(ch);
   dbgLog('to_mini', { ch: ch && ch.name });
 });
 
