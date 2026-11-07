@@ -1582,8 +1582,11 @@ function playChannel(ch) {
 // Web player: plays a relayed stream in a <video>. Prefers the native
 // fragmented-MP4 relay (no blob/MSE, so it works even where CSP blocks
 // blob: media); falls back to the HLS relay via hls.js when available.
+let _playSeq = 0;
 async function playWeb(ch) {
   if (!ch || !ch.url) { toast('No stream URL for this channel', true); return; }
+  const seq = ++_playSeq;
+  const latest = () => seq === _playSeq;
   const $p = $('webplayer'), vid = $('wpVideo');
   $('wpTitle').textContent = ch.name;
   state._cur = ch;
@@ -1602,13 +1605,13 @@ async function playWeb(ch) {
   vid._eofRestarts = 0;
   let mp4Err = null;
   for (let attempt = 0; attempt < 2; attempt++) {
-    try { await startMp4(ch); mp4Err = null; break; }
+    try { await startMp4(ch); mp4Err = null; if (!latest()) return; break; }
     catch (e) { mp4Err = e; dbgLog('mp4_failed', { msg: e.message, attempt }); if (attempt === 0) await new Promise(r => setTimeout(r, 2000)); }
   }
   if (mp4Err) {
     dbgLog('hls_fallback', {});
     try { await startHlsPlay(ch); }
-    catch (e2) { dbgLog('web_failed', { msg: e2.message }); setChErr(ch, e2.message); showPlayerErr('⚠ ' + ch.name + ' failed — ' + e2.message); toast('Channel failed: ' + e2.message, true); }
+    catch (e2) { if (!latest()) return; dbgLog('web_failed', { msg: e2.message }); setChErr(ch, e2.message); showPlayerErr('⚠ ' + ch.name + ' failed — ' + e2.message); toast('Channel failed: ' + e2.message, true); }
   }
 }
 function showLoader(on) {
