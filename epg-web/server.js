@@ -931,6 +931,7 @@ async function startMp4Relay(url, opts) {
     };
     const parseAudioTracks = () => relayAudioTracks(r.head);
     const tc = !!o.tc;
+    const qScale = o.scale === 'med' ? 'scale=1280:-2' : (o.scale === 'low' ? 'scale=854:-2' : null);
     const args = [
       '-hide_banner', '-loglevel', 'info', '-nostdin',
       '-user_agent', DEFAULT_UA,
@@ -939,7 +940,11 @@ async function startMp4Relay(url, opts) {
       '-err_detect', 'ignore_err',
       '-i', url,
     ];
-    if (tc) {
+    if (qScale) {
+      args.push('-map', '0:v:0', '-map', '0:a:' + (o.aIdx || 0));
+      args.push('-vf', qScale);
+      args.push('-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '30', '-c:a', 'aac', '-b:a', '128k');
+    } else if (tc) {
       args.push('-map', '0:v:0', '-map', '0:a:' + (o.aIdx || 0), '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28', '-c:a', 'aac', '-b:a', '128k');
     } else if (o.noBsf) {
       if (o.aIdx != null) args.push('-map', '0:v:0', '-map', '0:a:' + o.aIdx);
@@ -1580,9 +1585,9 @@ const server = http.createServer(async (req, res) => {
     if (p === '/streammp4' && req.method === 'POST') {
       if (req.headers['content-type']?.split(';')[0].trim() !== 'application/json')
         throw Object.assign(new Error('content-type must be application/json'), { status: 415 });
-      const { url, buffer, tc, proxy, id, aIdx } = parseJSON(await readBody(req));
+      const { url, buffer, tc, proxy, id, aIdx, scale } = parseJSON(await readBody(req));
       if (typeof url !== 'string' || !url.trim()) throw Object.assign(new Error('url is required'), { status: 400 });
-      const r = await startMp4WithRetry(url, { bufferMs: (Number(buffer) || 30) * 1000, tc: !!tc, proxy: proxy || '', id: id || 'main', aIdx: aIdx != null ? parseInt(aIdx, 10) : null });
+      const r = await startMp4WithRetry(url, { bufferMs: (Number(buffer) || 30) * 1000, tc: !!tc, proxy: proxy || '', id: id || 'main', aIdx: aIdx != null ? parseInt(aIdx, 10) : null, scale: scale || 'auto' });
       return sendJSON(res, 200, r);
     }
 

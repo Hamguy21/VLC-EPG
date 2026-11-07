@@ -1610,7 +1610,7 @@ function dbgLog(k, o) {
 // Start the native MP4 relay and attach the video + auto-reconnect monitor.
 async function startMp4(ch, quiet, tc) {
   const vid = $('wpVideo');
-  const r4 = await post('/streammp4', { url: ch.url, buffer: state.webBuffer, tc: !!tc, proxy: effectiveProxy(), aIdx: state._aIdx });
+  const r4 = await post('/streammp4', { url: ch.url, buffer: state.webBuffer, tc: !!tc, proxy: effectiveProxy(), aIdx: state._aIdx, scale: state.quality });
   if (r4.codecs) window._codecs = r4.codecs;
   window._audioTracks = Array.isArray(r4.audioTracks) ? r4.audioTracks : [];
   clearChErr(ch);
@@ -1932,7 +1932,9 @@ function showCtx(x, y, hasStats) {
         }
         else if (act && act.startsWith('q-')) {
           state.quality = act.slice(2);
-          toast('Stream quality preference: ' + state.quality + ' (auto/priority; VLC uses adaptive HLS)');
+          storageSet(LS_QUALITY, state.quality);
+          toast('Stream quality: ' + state.quality);
+          if (state._cur && $('webplayer').style.display === 'flex') { showLoader(true); startMp4(state._cur).catch(() => showPlayerErr('⚠ Quality switch failed')); }
         }
         else if (act && /^a-\d+$/.test(act)) {
           state._aIdx = parseInt(act.slice(2), 10);
