@@ -1399,7 +1399,7 @@ async function openMiniPlayer(ch) {
 function stopVideoEl(vid) { try { if (!vid) return; vid.pause(); vid.removeAttribute('src'); vid.load(); } catch (_) {} }
 
 const MINI_TPL = `
-  <div class="mp-head"><span class="mp-title"></span><button class="mp-close" title="Close preview">✕</button></div>
+  <div class="mp-head"><span class="mp-title"></span><div class="mp-head-btns"><button class="mp-close mp-expand" title="Open in full player">⛶</button><button class="mp-close" title="Close preview">✕</button></div></div>
   <video autoplay playsinline></video>
   <div class="mp-controls">
     <button class="mp-btn mp-play" title="Play / Pause">▶</button>
@@ -1424,6 +1424,12 @@ function makeMini(ch) {
 }
 function wireMiniClose(inst) {
   inst.el.querySelector('.mp-close').addEventListener('click', () => closeMini(inst));
+  inst.el.querySelector('.mp-expand').addEventListener('click', () => {
+    const ch = inst.ch, src = inst.vid.src;
+    closeMiniKeepRelay(inst);
+    if (src) showWebWithSrc(ch, src); else playFor(ch);
+    dbgLog('mini_expand', { ch: ch && ch.name });
+  });
 }
 function closeMini(inst) {
   if (!inst || inst.destroyed) return;
