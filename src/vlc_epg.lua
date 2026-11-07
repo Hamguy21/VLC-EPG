@@ -47,7 +47,7 @@ local DISPLAY_OPTIONS = {
 local DEFAULT_DISPLAY = 3
 
 -- Location of the companion web UI (Node server). Overridable in config.
-local DEFAULT_WEB_DIR = "I:/AI/vlc-epg/epg-web"
+local DEFAULT_WEB_DIR = ""
 local WEB_PORT = 8123
 local WEB_URL = "http://127.0.0.1:" .. WEB_PORT
 
@@ -983,14 +983,43 @@ local function web_running()
   return line ~= ""
 end
 
-local function launch_web()
-  local dir = native_path(state.web_dir)
-  local srv = dir .. "\\server.js"
-  local f = io.open(srv, "r")
-  if not f then
-    return false, "web UI not found at " .. state.web_dir .. " (set web_dir in vlc_epg.cfg)"
+local function self_extension_dir()
+  -- The VLC extensions loader loads this file from disk, so the running
+  -- source is "@<absolute path>". Use it to locate the distribution folder
+  -- we ship in, without relying on a hardcoded install path.
+  local info = debug.getinfo(1, "S")
+  local src = info and info.source or ""
+  if src:sub(1, 1) == "@" then
+    local p = src:sub(2)
+    if vlc.strings and vlc.strings.decode_uri then p = vlc.strings.decode_uri(p) end
+    p = p:gsub("\\", "/")
+    return p:match("^(.*)/[^/]*$") or p
   end
-  f:close()
+  return nil
+end
+
+local function launch_web()
+  -- Resolve the web UI server.js: an explicit web_dir wins, then the
+  -- self-contained distribution layout (web/ next to this extension), then
+  -- the in-repo dev layout (epg-web/).
+  local candidates = {}
+  if state.web_dir and state.web_dir ~= "" then candidates[#candidates + 1] = native_path(state.web_dir) end
+  local sd = self_extension_dir()
+  if sd then
+    candidates[#candidates + 1] = sd .. "/web"
+    candidates[#candidates + 1] = sd .. "/epg-web"
+  end
+
+  local srv, dir
+  for _, b in ipairs(candidates) do
+    local f = io.open(b .. "/server.js", "r")
+    if f then f:close(); srv = b .. "/server.js"; dir = b; break end
+  end
+
+  if not srv then
+    return false, "web UI not found (expected web/server.js next to this extension, or set web_dir in vlc_epg.cfg)"
+  end
+  dir = native_path(dir)
 
   if not web_running() then
     if is_windows() then

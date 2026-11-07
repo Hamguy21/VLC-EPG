@@ -144,8 +144,36 @@ vlc-epg/
 │       ├── style.css      -> layout & component styles
 │       └── theme.css      -> ★ edit this to re-skin (colors/variables)
 ├── tests/                 -> Lua unit + integration tests
-└── examples/              -> sample playlist/guide fixtures
+├── examples/              -> sample playlist/guide fixtures
+└── dist/vlc_epg/          -> ★ ready-to-drop-in single folder (below)
 ```
+
+### Single-folder install (drag-and-drop)
+
+The **`dist/vlc_epg/`** folder is the whole thing — the Lua extension **and**
+the web UI together — ready to drop into VLC:
+
+```text
+dist/vlc_epg/
+├── vlc_epg.lua      <- the extension
+├── web/             <- the website (server.js + public/)
+└── README.txt
+```
+
+1. Quit VLC.
+2. Open `dist/vlc_epg/` and copy its **contents** (`vlc_epg.lua` and the
+   `web/` folder) into your user extensions folder:
+   `%APPDATA%\vlc\lua\extensions\` (Windows). The extension **finds the
+   bundled `web/` folder next to itself** and starts the server automatically.
+   No paths to configure.
+3. Restart VLC → **View → VLC EPG (IPTV)**.
+4. Requires Node.js ≥ 16.
+
+> Note: VLC loads extension entry-points placed **directly** in `extensions/`
+> (a `vlc_epg.lua` file), so drop the folder's contents — not the folder
+> itself — into `extensions/`.
+
+`scripts/package.sh` rebuilds `dist/vlc_epg/` from the source tree.
 
 ### Run the web UI
 
