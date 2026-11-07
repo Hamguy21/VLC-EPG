@@ -34,15 +34,15 @@ binary path.
 
 ## Endpoints
 
-| Method | Path | Body | Returns |
-|--------|------|------|---------|
-| GET | `/` | — | the grid UI |
-| POST | `/parse/m3u` | `{src}` | channels, groups, header EPG |
-| POST | `/parse/xmltv` | `{src}` | channel/program counts |
-| POST | `/match` | `{m3u, xmltv}` | matched channels + programs |
-| POST | `/play` | `{url}` | launches VLC |
-| POST | `/stop` | — | stops VLC |
-| GET | `/health` | — | ok |
+| Method | Path           | Body | Returns |
+|--------|----------------|------|---------|
+| GET    | `/`            | —              | the grid UI                  |
+| POST   | `/parse/m3u`   | `{src}`        | channels, groups, header EPG |
+| POST   | `/parse/xmltv` | `{src}`        | channel/program counts       |
+| POST   | `/match`       | `{m3u, xmltv}` | matched channels + programs  |
+| POST   | `/play`        | `{url}`        | launches VLC                 |
+| POST   | `/stop`        | —              | stops VLC                    |
+| GET    | `/health`      | —              | ok                           |
 
 ## Dev
 

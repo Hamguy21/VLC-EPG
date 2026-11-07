@@ -8,8 +8,8 @@ const puppeteer = require('puppeteer-core');
 const path = require('path');
 const fs = require('fs');
 
-const M3U = process.env.M3U || 'I:/AI/vlc-epg/examples/test.m3u';
-const EPG = process.env.EPG || 'I:/AI/vlc-epg/examples/test_epg.xml';
+const M3U = process.env.M3U || path.join(__dirname, '..', 'examples', 'test.m3u');
+const EPG = process.env.EPG || path.join(__dirname, '..', 'examples', 'test_epg.xml');
 const OUT = process.env.OUT || path.join(__dirname, '..', 'docs', 'epg-web-preview.png');
 
 (async () => {

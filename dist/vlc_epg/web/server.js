@@ -20,14 +20,23 @@ const zlib = require('zlib');
 const crypto = require('crypto');
 const dns = require('dns').promises;
 const net = require('net');
-const { spawn, spawnSync } = require('child_process');
+const { spawn, spawnSync, execSync } = require('child_process');
 
 const PORT = process.env.PORT || 8123;
-const VLC = process.env.VLC_BIN || (
-  process.platform === 'win32'
-    ? 'C:\\Program Files\\VideoLAN\\VLC\\vlc.exe'
-    : 'vlc'
-);
+// Resolve a VLC binary: explicit env wins, then PATH, then common install
+// locations (fallback only). Returns null if none is found.
+const VLC = (() => {
+  if (process.env.VLC_BIN) return process.env.VLC_BIN;
+  const cands = ['vlc'];
+  if (process.platform === 'win32') {
+    cands.push('C:\\Program Files\\VideoLAN\\VLC\\vlc.exe');
+    cands.push('C:\\Program Files (x86)\\VideoLAN\\VLC\\vlc.exe');
+  }
+  for (const c of cands) {
+    try { const r = spawnSync(c, ['--version'], { stdio: 'ignore' }); if (r.status === 0) return c; } catch (_) {}
+  }
+  return null;
+})();
 const MAX_BODY = 1 << 20;            // 1 MB request body cap
 const MAX_SOURCE_BYTES = 128 * 1024 * 1024;
 const MAX_DECOMPRESSED_BYTES = 256 * 1024 * 1024;
@@ -42,16 +51,64 @@ const RELAY_DIR = path.join(SAVE_DIR, 'relay');
 // large ceiling is safe.
 const MAX_RELAY_HOLD = 64 * 1024 * 1024;
 
-// Resolve an FFmpeg binary (env override, PATH, or the bundled Hermes copy).
+// Resolve an FFmpeg binary (env override, PATH, sibling .ffmpeg/, or the
+// bundled Hermes copy). If none exists, ensureFFmpeg() downloads a portable
+// build into ./data/ffmpeg/ on first use.
+const FFMPEG_CANDIDATES = () => {
+  const c = [];
+  if (process.env.FFMPEG_BIN) c.push(process.env.FFMPEG_BIN);
+  c.push('ffmpeg');
+  c.push(path.join(__dirname, '.ffmpeg', process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg'));
+  c.push(path.join(SAVE_DIR, 'ffmpeg', process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg'));
+  return c;
+};
 const FFMPEG = (() => {
-  const cands = process.env.FFMPEG_BIN
-    ? [process.env.FFMPEG_BIN]
-    : ['ffmpeg', 'C:\\Users\\Ham\\AppData\\Local\\hermes\\tools\\ffmpeg-9.0.1-win32-x64\\bin\\ffmpeg.EXE'];
-  for (const c of cands) {
+  for (const c of FFMPEG_CANDIDATES()) {
     try { const r = spawnSync(c, ['-version'], { stdio: 'ignore' }); if (r.status === 0) return c; } catch (_) {}
   }
   return null;
 })();
+
+const FFMPEG_DL = {
+  win32:  { url: 'https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip', kind: 'zip', ext: 'zip' },
+  linux:   { url: 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz', kind: 'txz', ext: 'xz' },
+  darwin:  { url: 'https://evermeet.cx/ffmpeg/getrelease/zip', kind: 'zip', ext: 'zip' },
+};
+
+async function ensureFFmpeg() {
+  if (FFMPEG) return FFMPEG;
+  const destDir = path.join(SAVE_DIR, 'ffmpeg');
+  const exe = path.join(destDir, process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg');
+  try { const r = spawnSync(exe, ['-version'], { stdio: 'ignore' }); if (r.status === 0) return exe; } catch (_) {}
+  const dl = FFMPEG_DL[process.platform];
+  if (!dl) return null;
+  const tmp = path.join(destDir, 'dl');
+  try { fs.mkdirSync(tmp, { recursive: true }); } catch (_) {}
+  const archive = path.join(tmp, 'a.' + dl.ext);
+  try {
+    console.log('[vlc-epg] first run: downloading a portable FFmpeg…');
+    execSync(`curl -sSL -o "${archive}" "${dl.url}"`, { stdio: 'ignore' });
+    if (dl.kind === 'zip') execSync(`tar -xf "${archive}" -C "${tmp}"`, { stdio: 'ignore' });
+    else execSync(`tar -xJf "${archive}" -C "${tmp}"`, { stdio: 'ignore' });
+    const walk = d => {
+      for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+        const p = path.join(d, e.name);
+        if (e.isDirectory()) { const f = walk(p); if (f) return f; }
+        else if (e.name === (process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg')) return p;
+      }
+      return null;
+    };
+    const found = walk(tmp);
+    if (found) { fs.copyFileSync(found, exe); }
+    fs.rmSync(tmp, { recursive: true, force: true });
+    const chk = spawnSync(exe, ['-version'], { stdio: 'ignore' });
+    if (chk.status === 0) return exe;
+  } catch (e) {
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (_) {}
+    console.error('[vlc-epg] ffmpeg auto-download failed:', e.message);
+  }
+  return null;
+}
 
 /* ------------------------------------------------------------------ */
 /* HTTP helpers                                                        */
@@ -669,8 +726,9 @@ function stopRelay() {
 // local play URL. Caller decides what plays it (VLC or a web player).
 async function startRelay(url, opts = {}) {
   if (/pluto\.tv/i.test(url)) { try { const f = await plutoFreshUrl(url); if (f) url = f; } catch (_) {} }
+  const ff = await ensureFFmpeg();
   return new Promise((resolve, reject) => {
-    if (!FFMPEG) return reject(new Error('FFmpeg is not available on this system'));
+    if (!ff) return reject(new Error('FFmpeg is not available on this system'));
     stopRelay();
     const slug = 's' + Date.now().toString(36);
     const dir = path.join(RELAY_DIR, slug);
@@ -693,7 +751,7 @@ async function startRelay(url, opts = {}) {
     const childEnv = { ...process.env };
     if (opts.proxy) { childEnv.http_proxy = opts.proxy; childEnv.https_proxy = opts.proxy; childEnv.all_proxy = opts.proxy; }
     let child;
-    try { child = spawn(FFMPEG, args, { detached: false, env: childEnv }); }
+    try { child = spawn(ff, args, { detached: false, env: childEnv }); }
     catch (e) { return reject(new Error('failed to start FFmpeg: ' + e.message)); }
     relayChild = child; relayDir = dir;
     const errLines = [];
@@ -814,8 +872,9 @@ function startMp4Watchdog(url, opts) {
 async function startMp4Relay(url, opts) {
   if (/pluto\.tv/i.test(url)) { try { const f = await plutoFreshUrl(url, mp4ForceFresh); mp4ForceFresh = false; if (f) url = f; } catch (_) {} }
   mp4TStart = Date.now();
+  const ff = await ensureFFmpeg();
   return new Promise((resolve, reject) => {
-    if (!FFMPEG) return reject(new Error('FFmpeg is not available on this system'));
+    if (!ff) return reject(new Error('FFmpeg is not available on this system'));
     stopMp4Relay();
     const slug = 'm' + Date.now().toString(36);
     const dir = path.join(RELAY_DIR, slug);
@@ -859,7 +918,7 @@ async function startMp4Relay(url, opts) {
     const childEnv = { ...process.env };
     if (opts.proxy) { childEnv.http_proxy = opts.proxy; childEnv.https_proxy = opts.proxy; childEnv.all_proxy = opts.proxy; }
     let child;
-    try { child = spawn(FFMPEG, args, { detached: false, env: childEnv }); }
+    try { child = spawn(ff, args, { detached: false, env: childEnv }); }
     catch (e) { return reject(new Error('failed to start FFmpeg: ' + e.message)); }
     mp4Child = child; mp4File = file; mp4Slug = slug; mp4BufferMs = bufferMs;
     sev('relay_start', { slug, url });
