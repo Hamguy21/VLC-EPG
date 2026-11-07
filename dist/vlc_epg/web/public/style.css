@@ -313,6 +313,7 @@
     user-select:none; -webkit-user-select:none; transition:opacity .25s; }
   .mini-player.idle .mp-head, .webplayer.idle .wp-head { opacity:0; pointer-events:none; }
   .webplayer .wp-head { transition:opacity .25s; }
+  body.tv.cursor-idle, body.tv.cursor-idle * { cursor:none !important; }
   .mini-player .mp-title { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .mini-player .mp-close { border:none; background:transparent; color:var(--muted);
     font-size:14px; cursor:pointer; line-height:1; padding:2px 4px; }

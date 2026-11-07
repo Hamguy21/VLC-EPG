@@ -1571,6 +1571,21 @@ function armPlayerAutoHide() {
   document.addEventListener('keydown', e => { if (e.key === 'ArrowUp') kick(); });
 }
 armPlayerAutoHide();
+
+// TV mode: auto-hide the mouse cursor after inactivity (remote-friendly).
+function armTvCursorHide() {
+  if (window._tvCursorHide) return; window._tvCursorHide = true;
+  let t = null;
+  const show = () => {
+    document.body.classList.remove('cursor-idle');
+    clearTimeout(t);
+    t = setTimeout(() => { if (document.body.classList.contains('tv')) document.body.classList.add('cursor-idle'); }, 3000);
+  };
+  document.addEventListener('mousemove', show);
+  document.addEventListener('keydown', show);
+  show();
+}
+armTvCursorHide();
 function applyWebFs(on) {
   const el = $('webplayer');
   try {
@@ -2284,13 +2299,33 @@ const t = e.target;
 if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA')) return;
 if ($('webplayer').style.display === 'flex') { handlePlayerKey(e); return; }
 if (!state.view.length) return;
+if (/^[0-9]$/.test(e.key)) {
+  e.preventDefault();
+  state._zap = ((state._zap || '') + e.key).slice(0, 3);
+  clearTimeout(state._zapT);
+  state._zapT = setTimeout(() => { state._zap = ''; }, 2500);
+  const n = parseInt(state._zap, 10);
+  if (n >= 1 && n <= state.view.length) selectAt(n - 1);
+  return;
+}
 switch (e.key) {
   case 'ArrowDown': e.preventDefault(); selectAt((state.sel == null ? -1 : state.sel) + 1); break;
   case 'ArrowUp':   e.preventDefault(); selectAt((state.sel == null ? 1 : state.sel) - 1); break;
   case 'ArrowRight': e.preventDefault(); stage.scrollLeft += 140; break;
   case 'ArrowLeft':  e.preventDefault(); stage.scrollLeft -= 140; break;
+  case 'PageDown': e.preventDefault(); selectAt((state.sel == null ? -1 : state.sel) + 10); break;
+  case 'PageUp':   e.preventDefault(); selectAt((state.sel == null ? 11 : state.sel) - 10); break;
+  case 'Home': e.preventDefault(); selectAt(0); break;
+  case 'End':  e.preventDefault(); selectAt(state.view.length ? state.view.length - 1 : 0); break;
   case 'Enter': {
-    const ch = selChannel(); if (ch) { e.preventDefault(); playFor(ch); dbgChanChange(ch, 'grid'); } break;
+    e.preventDefault();
+    if (state._zap) {
+      const n = parseInt(state._zap, 10); state._zap = '';
+      if (n >= 1 && n <= state.view.length) { selectAt(n - 1); playFor(state.view[n - 1]); dbgChanChange(state.view[n - 1], 'number'); }
+    } else {
+      const ch = selChannel(); if (ch) { playFor(ch); dbgChanChange(ch, 'grid'); }
+    }
+    break;
   }
   case ' ': {
     const ch = selChannel(); if (ch) { e.preventDefault(); playFor(ch); dbgChanChange(ch, 'grid'); } break;
