@@ -560,7 +560,9 @@ function selectedSources() {
 }
 function refreshSavedDropdown(selectedName) {
   const dd = $('saved'); const list = savedSources();
-  dd.innerHTML = '<option value="">— none —</option>' + list.map(s =>
+  dd.innerHTML = '<option value="">— none —</option>' +
+    (list.length ? '<option value="__all__">⚡ All sources</option>' : '') +
+    list.map(s =>
     `<option ${s.name === selectedName ? 'selected' : ''}>${escapeHtml(s.name)}</option>`).join('');
 }
 // Save current playlist/EPG as a named source (add or overwrite)
@@ -584,6 +586,14 @@ $('saveSrc').addEventListener('click', () => {
   refreshSavedDropdown(name);
   toast('Saved: ' + name);
 });
+// "⚡ All sources": selecting it auto-selects every saved source and loads them.
+$('saved').addEventListener('change', () => {
+  const dd = $('saved');
+  const hasAll = [...dd.options].some(o => o.selected && o.value === '__all__');
+  if (!hasAll) return;
+  [...dd.options].forEach(o => { if (o.value && o.value !== '__all__') o.selected = true; });
+  $('loadSaved').click();
+});
 // Load the selected source(s) — merge multiple into one grid
 $('loadSaved').addEventListener('click', async () => {
   const sel = selectedSources();
@@ -599,10 +609,16 @@ $('loadSaved').addEventListener('click', async () => {
   setStatus('Loading ' + sel.length + ' playlists…'); showLoading(true);
   try {
     let allCh = []; const groups = new Set();
+    const seenUrl = new Set(), seenTvg = new Set();
     for (const s of sel) {
       const m = await post('/parse/m3u', { src: s.m3u });
       for (const c of m.channels) {
-        if (!allCh.some(x => x.url === c.url)) allCh.push(c);
+        const u = c.url;
+        const t = String(c.tvg_id || '').trim().toLowerCase();
+        if (seenUrl.has(u)) continue;              // exact duplicate URL
+        if (t && seenTvg.has(t)) continue;         // same logical channel already seen (hide duplicate)
+        seenUrl.add(u); if (t) seenTvg.add(t);
+        allCh.push(c);
       }
       (m.groupList || []).forEach(g => groups.add(g));
     }
