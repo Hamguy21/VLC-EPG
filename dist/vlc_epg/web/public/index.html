@@ -265,12 +265,12 @@
 <div class="gridview" id="gridView" style="display:none">
   <div class="ghead">
     <span class="gtitle">Multiview — up to 4 channels</span>
+    <select id="gridGroup" title="Filter channels by group"><option value="">All groups</option></select>
     <span class="gridsearchwrap">
       <input type="text" id="gridSearch" placeholder="Type to choose a channel…" autocomplete="off">
       <div class="jump-results" id="gridResults"></div>
     </span>
-    <select id="gridGroup" title="Filter channels by group"><option value="">All groups</option></select>
-    <span class="ghint">click a square then pick a channel · ✕ closes it · up to 4</span>
+    <span class="ghint">click a square then pick a channel · up to 4</span>
     <button class="btn ghost small" id="gridAdd">＋ Add channel</button>
     <button class="btn ghost small" id="gridClose">✕ Close</button>
   </div>
@@ -1287,12 +1287,14 @@ function openGrid() {
   const gg = $('gridGroup'); if (gg) { gg.innerHTML = '<option value="">All groups</option>' + state.groups.map(g => `<option>${escapeHtml(g)}</option>`).join(''); }
   addSlot(); // default: one player
   $('gridAdd').focus();
+  state._gridTimer = setInterval(gridStallWatch, 3000);
 }
 function closeGrid() {
   const gv = $('gridView'); if (gv) gv.style.display = 'none';
   hideGridList();
   for (let i = (state._gridSlots || []).length - 1; i >= 0; i--) removeSlot(i);
   state._gridSlots = []; state._gridArmed = null;
+  if (state._gridTimer) { clearInterval(state._gridTimer); state._gridTimer = null; }
 }
 function relayout() {
   const n = (state._gridSlots || []).length;
@@ -1371,7 +1373,7 @@ function syncGridCell(idx) {
   if (s.url) {
     label.textContent = s.ch.name;
     label.style.display = ''; closeBtn.style.display = ''; add.style.display = 'none'; controls.style.display = 'flex';
-    if (vid.src !== s.url) { vid.src = s.url; vid.onloadedmetadata = () => vid.play().catch(() => {}); }
+    if (vid.src !== s.url) { vid.src = s.url; s._lastT = 0; s._stallStart = Date.now(); vid.onloadedmetadata = () => vid.play().catch(() => {}); }
   } else {
     label.style.display = 'none'; closeBtn.style.display = 'none'; add.style.display = 'flex'; controls.style.display = 'none';
     vid.removeAttribute('src'); vid.load();
@@ -1389,7 +1391,7 @@ function startGridCell(idx, ch) {
   if (!s.id) s.id = 'grid' + (++state._gridSeq);
   syncGridCell(idx); // show spinner while loading
   post('/streammp4', { url: ch.url, buffer: state.webBuffer, scale: 'auto', id: s.id })
-    .then(r => { if (state._gridSlots[idx] === s && s.ch === ch) { s.url = r.url; syncGridCell(idx); } })
+    .then(r => { if (state._gridSlots[idx] === s && s.ch === ch) { s.url = r.url; s._lastT = 0; s._stallStart = Date.now(); syncGridCell(idx); } })
     .catch(e => { s.ch = null; syncGridCell(idx); toast('Grid player ' + (idx+1) + ' failed: ' + e.message, true); });
 }
 function assignGridChannel(ch) {
@@ -1421,6 +1423,24 @@ function showGridList(q) {
   list.style.display = 'block';
 }
 function hideGridList() { const l = $('gridChList'); if (l) l.style.display = 'none'; }
+function gridStallWatch() {
+  const slots = state._gridSlots || [];
+  const now = Date.now();
+  slots.forEach((s, idx) => {
+    if (!s || !s.url) return;
+    const vid = s.el.querySelector('video');
+    if (!vid || vid.paused || vid.ended) return;
+    const t = vid.currentTime;
+    if (t !== s._lastT) { s._lastT = t; s._stallStart = now; }
+    else if (now - s._stallStart > 12000 && now > (s._retryAt || 0)) {
+      s._retryAt = now + 15000;
+      post('/streammp4', { url: s.ch.url, buffer: state.webBuffer, scale: 'auto', id: s.id })
+        .then(r => { if (state._gridSlots[idx] === s) { s.url = r.url; s._lastT = 0; s._stallStart = Date.now(); syncGridCell(idx); } })
+        .catch(() => {});
+    }
+  });
+}
+
 function gridZapKey(e) {
   if ($('gridView').style.display !== 'flex') return;
   const t = e.target; if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA')) return;
