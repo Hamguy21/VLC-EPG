@@ -70,6 +70,7 @@
       <button class="seg-btn" data-player="vlc">VLC</button>
       <button class="seg-btn" data-player="web">Web</button>
     </span>
+    <button class="btn ghost small" id="gridBtn" title="Multiview grid — watch up to 4 channels at once">▦ Grid</button>
   </div>
 
   <div class="stage" id="stage" tabindex="0" aria-label="Electronic program guide">
@@ -260,6 +261,19 @@
 <div id="miniZone"></div>
 <div class="tvhint" id="tvHint" aria-hidden="true">↑/↓ channel · ←/→ time · Enter play · 0–9 zap · Back close</div>
 
+<!-- Multiview grid overlay -->
+<div class="gridview" id="gridView" style="display:none">
+  <div class="ghead">
+    <span class="gtitle">Multiview — up to 4 channels</span>
+    <span class="gridsearchwrap">
+      <input type="text" id="gridSearch" placeholder="Type to choose a channel…" autocomplete="off">
+      <div class="jump-results" id="gridResults"></div>
+    </span>
+    <span class="ghint">click an empty square, then pick a channel (or just type)</span>
+    <button class="btn ghost small" id="gridClose">✕ Close</button>
+  </div>
+  <div class="grid-cells" id="gridCells"></div>
+</div>
 <!-- Web player overlay -->
 <div class="webplayer" id="webplayer" style="display:none">
   <div class="wp-head">
@@ -1255,6 +1269,100 @@ function render() {
       if (current) updateNowBar(current);
     }
   }, 30000);
+}
+
+/* ---------- Multiview grid (up to 4 channels) ---------- */
+function openGrid() {
+  const gv = $('gridView'); if (!gv) return;
+  state._grid = [null, null, null, null];
+  state._gridArmed = null;
+  const wrap = $('gridCells'); wrap.innerHTML = '';
+  state._gridCells = [];
+  for (let i = 0; i < 4; i++) {
+    const cell = document.createElement('div');
+    cell.className = 'gcell'; cell.dataset.i = i;
+    cell.innerHTML = '<video autoplay playsinline></video>' +
+      '<div class="glabel"></div>' +
+      '<button class="gclose" title="Stop">✕</button>' +
+      '<div class="gadd">＋ Choose channel</div>';
+    cell.querySelector('.gclose').addEventListener('click', e => { e.stopPropagation(); stopGridCell(i); });
+    cell.querySelector('.gadd').addEventListener('click', e => { e.stopPropagation(); armGridCell(i); });
+    state._gridCells.push(cell);
+    wrap.appendChild(cell);
+  }
+  gv.style.display = 'flex';
+  $('gridSearch').value = ''; hideGridResults();
+  $('gridSearch').focus();
+}
+function closeGrid() {
+  const gv = $('gridView'); if (gv) gv.style.display = 'none';
+  for (let i = 0; i < 4; i++) stopGridCell(i);
+  state._grid = []; state._gridCells = []; state._gridArmed = null;
+}
+function syncGridCell(i) {
+  const cell = state._gridCells[i]; if (!cell) return;
+  const g = state._grid[i];
+  const vid = cell.querySelector('video'), label = cell.querySelector('.glabel'),
+        closeBtn = cell.querySelector('.gclose'), add = cell.querySelector('.gadd');
+  cell.classList.toggle('playing', !!g);
+  cell.classList.toggle('armed', state._gridArmed === i);
+  if (g && g.url) {
+    label.textContent = g.ch.name;
+    label.style.display = ''; closeBtn.style.display = ''; add.style.display = 'none';
+    if (vid.src !== g.url) { vid.src = g.url; vid.onloadedmetadata = () => vid.play().catch(() => {}); }
+  } else {
+    label.style.display = 'none'; closeBtn.style.display = 'none'; add.style.display = 'flex';
+    vid.removeAttribute('src'); vid.load();
+  }
+}
+function armGridCell(i) {
+  state._gridArmed = i;
+  state._gridCells.forEach((c, k) => c.classList.toggle('armed', k === i));
+  const s = $('gridSearch'); if (s) { s.focus(); s.placeholder = 'Pick a channel for square ' + (i+1) + '…'; }
+}
+function startGridCell(i, ch) {
+  state._grid[i] = { ch, url: null };
+  post('/streammp4', { url: ch.url, buffer: state.webBuffer, scale: 'auto', id: 'grid' + i })
+    .then(r => { if (state._grid[i] && state._grid[i].ch === ch) { state._grid[i].url = r.url; syncGridCell(i); } })
+    .catch(e => { state._grid[i] = null; syncGridCell(i); toast('Grid square ' + (i+1) + ' failed: ' + e.message, true); });
+}
+function stopGridCell(i) {
+  const g = state._grid[i];
+  state._grid[i] = null;
+  if (g && g.url) post('/stop', { id: 'grid' + i }).catch(() => {});
+  if (state._gridCells && state._gridCells[i]) syncGridCell(i);
+}
+function hideGridResults() { const r = $('gridResults'); if (r) r.innerHTML = ''; }
+$('gridBtn').addEventListener('click', openGrid);
+$('gridClose').addEventListener('click', closeGrid);
+$('gridSearch').addEventListener('input', () => {
+  const q = $('gridSearch').value.trim().toLowerCase();
+  const list = $('gridResults');
+  if (!q) { hideGridResults(); return; }
+  const matches = state.view.filter(c => c.url && c.name.toLowerCase().includes(q)).slice(0, 40);
+  list.innerHTML = matches.map(c => `<div class="jr" data-n="${escapeHtml(c.name)}">${escapeHtml(c.name)}</div>`).join('') || '<div class="jr-none">no matches</div>';
+  list.querySelectorAll('.jr').forEach(el => {
+    el.addEventListener('click', () => {
+      const name = el.dataset.n;
+      const ch = state.view.find(c => c.name === name && c.url);
+      if (ch) assignGridChannel(ch);
+    });
+  });
+});
+$('gridSearch').addEventListener('keydown', e => {
+  if (e.key === 'Enter') {
+    const first = $('gridResults').querySelector('.jr');
+    if (first) { const name = first.dataset.n; const ch = state.view.find(c => c.name === name && c.url); if (ch) assignGridChannel(ch); }
+  } else if (e.key === 'Escape') { hideGridResults(); }
+});
+function assignGridChannel(ch) {
+  let target = state._gridArmed;
+  if (target == null) { target = state._grid.findIndex(g => !g); }
+  if (target < 0) { toast('All 4 grid squares are full', true); return; }
+  state._gridArmed = null;
+  state._gridCells.forEach(c => c.classList.remove('armed'));
+  $('gridSearch').value = ''; hideGridResults(); $('gridSearch').placeholder = 'Type to choose a channel…';
+  startGridCell(target, ch);
 }
 
 /* ---------- play + details ---------- */
