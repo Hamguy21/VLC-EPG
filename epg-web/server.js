@@ -36,6 +36,11 @@ const MAX_REDIRECTS = 4;
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const SAVE_DIR = path.join(__dirname, 'data');
 const RELAY_DIR = path.join(SAVE_DIR, 'relay');
+// Upper bound on how many bytes the relay withholds to build the buffer.
+// Kept generous so high-bitrate streams (1080p+) and large buffer settings
+// actually buffer as configured; relays are killed on channel switch, so a
+// large ceiling is safe.
+const MAX_RELAY_HOLD = 64 * 1024 * 1024;
 
 // Resolve an FFmpeg binary (env override, PATH, or the bundled Hermes copy).
 const FFMPEG = (() => {
@@ -940,11 +945,11 @@ function streamGrowingFile(res, file, opts) {
   };
 
   // Bytes we may release now (recent media is withheld to build the buffer).
-  // The hold is capped at 15MB so the buffer never grows unbounded and
-  // playback never hangs behind an ever-growing withhold.
+  // The hold is capped at MAX_RELAY_HOLD so the buffer never grows unbounded
+  // and playback never hangs behind an ever-growing withhold.
   const releaseOffset = () => {
     const recv = recvBytes();
-    const holdBytes = Math.min(bps() * holdSec(), 15 * 1024 * 1024);
+    const holdBytes = Math.min(bps() * holdSec(), MAX_RELAY_HOLD);
     return Math.max(0, recv - holdBytes);
   };
 
