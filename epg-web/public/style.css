@@ -455,3 +455,9 @@
   .gridview .gcell .gseek { flex:1; }
   .gridview .gcell .gseek, .gridview .gcell .gvol { accent-color:var(--accent); height:14px; cursor:pointer; }
   .gridview .gcell .gvol { width:46px; }
+
+  .gridview .gcell .gdbg { position:absolute; top:6px; right:34px; z-index:6; border:none;
+    background:rgba(0,0,0,.5); color:#fff; border-radius:6px; cursor:pointer; padding:2px 8px; font-size:12px; }
+  .gridview .gcell .gdbg-panel { position:absolute; top:34px; right:8px; z-index:8; width:210px;
+    background:#161b26; border:1px solid var(--border); border-radius:10px; padding:10px;
+    box-shadow:0 8px 30px rgba(0,0,0,.5); font-size:12px; line-height:1.5; }

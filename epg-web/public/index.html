@@ -1326,6 +1326,8 @@ function makeCell() {
   cell.innerHTML = '<video autoplay playsinline></video>' +
     '<div class="gloading"><div class="spin"></div></div>' +
     '<div class="glabel"></div>' +
+    '<button class="gdbg" title="Debug this player">🐞</button>' +
+    '<div class="gdbg-panel" style="display:none"></div>' +
     '<button class="gclose" title="Stop / close">✕</button>' +
     '<div class="gadd">＋ Choose channel</div>' +
     '<div class="gcontrols">' +
@@ -1344,6 +1346,11 @@ function makeCell() {
     e.stopPropagation();
     const idx = state._gridSlots.findIndex(s => s.el === cell);
     if (idx >= 0) armGridCell(idx);
+  });
+  cell.querySelector('.gdbg').addEventListener('click', e => {
+    e.stopPropagation();
+    const idx = state._gridSlots.findIndex(s => s.el === cell);
+    if (idx >= 0) toggleGridDbg(idx);
   });
   bindCellControls(cell, cell.querySelector('video'));
   return cell;
@@ -1367,7 +1374,9 @@ function syncGridCell(idx) {
   const s = state._gridSlots[idx]; if (!s) return;
   const vid = s.el.querySelector('video'), label = s.el.querySelector('.glabel'),
         closeBtn = s.el.querySelector('.gclose'), add = s.el.querySelector('.gadd'),
-        loading = s.el.querySelector('.gloading'), controls = s.el.querySelector('.gcontrols');
+        loading = s.el.querySelector('.gloading'), controls = s.el.querySelector('.gcontrols'),
+        dbgBtn = s.el.querySelector('.gdbg');
+  if (dbgBtn) dbgBtn.style.display = state.adv ? '' : 'none';
   s.el.classList.toggle('playing', !!s.url);
   s.el.classList.toggle('armed', state._gridArmed === idx);
   loading.style.display = (s.ch && !s.url) ? 'flex' : 'none';
@@ -1392,7 +1401,7 @@ function startGridCell(idx, ch) {
   if (!s.id) s.id = 'grid' + (++state._gridSeq);
   syncGridCell(idx); // show spinner while loading
   post('/streammp4', { url: ch.url, buffer: state.webBuffer, scale: 'auto', id: s.id })
-    .then(r => { if (state._gridSlots[idx] === s && s.ch === ch) { s.url = r.url; s._lastT = 0; s._stallStart = Date.now(); syncGridCell(idx); } })
+    .then(r => { if (state._gridSlots[idx] === s && s.ch === ch) { s.url = r.url; s._codecs = r.codecs || null; s._lastT = 0; s._stallStart = Date.now(); syncGridCell(idx); } })
     .catch(e => { s.ch = null; syncGridCell(idx); toast('Grid player ' + (idx+1) + ' failed: ' + e.message, true); });
 }
 function assignGridChannel(ch) {
@@ -1424,6 +1433,22 @@ function showGridList(q) {
   list.style.display = 'block';
 }
 function hideGridList() { const l = $('gridChList'); if (l) l.style.display = 'none'; }
+function toggleGridDbg(idx) {
+  const s = state._gridSlots[idx]; if (!s) return;
+  const panel = s.el.querySelector('.gdbg-panel');
+  if (!panel) return;
+  if (panel.style.display === 'block') { panel.style.display = 'none'; return; }
+  const cc = s._codecs || {};
+  const ccLine = (cc.video || '?') + ' / ' + (cc.audio || '?') + (cc.res ? ' @ ' + cc.res : '');
+  panel.innerHTML =
+    '<div style="font-weight:700;margin-bottom:4px">🐞 Player debug</div>' +
+    '<div>Relay id: <b>' + escapeHtml(s.id || '—') + '</b></div>' +
+    '<div>Codecs: ' + escapeHtml(ccLine) + '</div>' +
+    '<div style="margin-top:6px"><button class="stats-copy" data-full="1">Open full debug</button></div>';
+  panel.querySelector('[data-full]').onclick = () => { panel.style.display='none'; openDbg(); };
+  panel.style.display = 'block';
+}
+
 function gridStallWatch() {
   const slots = state._gridSlots || [];
   const now = Date.now();
