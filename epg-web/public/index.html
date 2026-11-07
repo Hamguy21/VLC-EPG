@@ -269,6 +269,7 @@
     width:420px; max-width:92%; padding:18px 20px; box-shadow:0 12px 40px rgba(0,0,0,.5); }
   .panel h2 { margin:0 0 4px; font-size:16px; }
   .panel .p-sub { font-size:12px; color:var(--muted); margin-bottom:14px; }
+  .panel:not(.adv-on) .adv { display:none; }
   .panel .p-row { margin-bottom:14px; }
   .panel .p-lbl { font-size:11px; text-transform:uppercase; letter-spacing:.5px;
     color:var(--muted); display:block; margin-bottom:6px; }
@@ -446,6 +447,11 @@
   <div class="panel" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
     <h2 id="settingsTitle">Settings</h2>
     <div class="p-sub">Changes apply immediately.</div>
+    <div class="p-row">
+      <label class="fmt-opt" style="display:inline-flex;gap:8px">
+        <input type="checkbox" id="advMode"> Show advanced settings
+      </label>
+    </div>
 
     <div class="p-section">Playback · VLC</div>
     <div class="p-row">
@@ -455,7 +461,7 @@
         <option value="web">Web player</option>
       </select>
     </div>
-    <div class="p-row">
+    <div class="p-row adv">
       <span class="p-lbl">Network cache (ms) — VLC only; raise if video drops after a few seconds</span>
       <input type="number" id="netCache" min="300" max="10000" step="100" style="width:100%;padding:7px 10px;border-radius:8px;border:1px solid var(--border);background:var(--panel2);color:var(--text);font-size:13px">
     </div>
@@ -464,17 +470,17 @@
         <input type="checkbox" id="fsMode"> Open channels in fullscreen (VLC and Web)
       </label>
     </div>
-    <div class="p-row">
+    <div class="p-row adv">
       <label class="fmt-opt" style="display:inline-flex;gap:8px">
         <input type="checkbox" id="hwMode"> Hardware decoding (VLC, DXVA2)
       </label>
     </div>
-    <div class="p-row">
+    <div class="p-row adv">
       <label class="fmt-opt" style="display:inline-flex;gap:8px">
         <input type="checkbox" id="arMode"> Auto-restart segmented channels (e.g. Pluto)
       </label>
     </div>
-    <div class="p-row">
+    <div class="p-row adv">
       <span class="p-lbl">Stream quality (preference; VLC uses adaptive HLS)</span>
       <select id="qualitySel" class="pref-lang">
         <option value="auto">Auto</option>
@@ -486,7 +492,7 @@
 
     <div class="p-divider"></div>
     <div class="p-section">Web player</div>
-    <div class="p-row">
+    <div class="p-row adv">
       <label class="fmt-opt" style="display:inline-flex;gap:8px">
         <input type="checkbox" id="relayMode"> Use FFmpeg relay (fixes streams that drop, e.g. Pluto)
       </label>
@@ -500,7 +506,7 @@
         <input type="checkbox" id="chnoMode"> Show channel number on video (auto-hides)
       </label>
     </div>
-    <div class="p-row">
+    <div class="p-row adv">
       <span class="p-lbl">Connection speed test</span>
       <button class="btn ghost small" id="speedtestBtn" style="margin-top:6px">▶ Run speed test</button>
       <div id="speedResult" style="margin-top:6px;font-size:12px;color:var(--muted)"></div>
@@ -519,6 +525,11 @@
     <div class="p-row">
       <label class="fmt-opt" style="display:inline-flex;gap:8px">
         <input type="checkbox" id="tvMode"> TV mode (bigger UI for remote / distance)
+      </label>
+    </div>
+    <div class="p-row">
+      <label class="fmt-opt" style="display:inline-flex;gap:8px">
+        <input type="checkbox" id="h12Mode"> 12-hour clock (AM/PM)
       </label>
     </div>
 
@@ -546,7 +557,7 @@
 
     <div class="p-divider"></div>
     <div class="p-section">Debug</div>
-    <div class="p-row">
+    <div class="p-row adv">
       <label class="fmt-opt" style="display:inline-flex;gap:8px">
         <input type="checkbox" id="dbgMode"> Debug mode (record player/server events; Debug in the video menu)
       </label>
@@ -587,7 +598,7 @@
 <script>
 const $ = id => document.getElementById(id);
 const stage = $('stage');
-const state = { channels: [], groups: [], now: Date.now(), fav: new Set(), current: null, dfmt: 'DMY', sel: null, view: [], lang: 'en', translate: false, fullscreen: false, netCache: 3000, relay: false, player: 'vlc', webBuffer: 30, hw: false, quality: 'auto', debug: false, autoRestart: true, chno: true, loadLast: true };
+const state = { channels: [], groups: [], now: Date.now(), fav: new Set(), current: null, dfmt: 'DMY', sel: null, view: [], lang: 'en', translate: false, fullscreen: false, netCache: 3000, relay: false, player: 'vlc', webBuffer: 30, hw: false, quality: 'auto', debug: false, autoRestart: true, chno: true, loadLast: true, h12: false, adv: false };
 let timer = null, toastTimer = null, activeLoadId = 0;
 const LS_SOURCES = 'vlcEpgSources';
 const LS_FAV = 'vlcEpgFavorites';
@@ -606,6 +617,8 @@ const LS_AR = 'vlcEpgAutoRestart';
 const LS_CHNO = 'vlcEpgChno';
 const LS_QUALITY = 'vlcEpgQuality';
 const LS_LASTON = 'vlcEpgLoadLast';
+const LS_H12 = 'vlcEpg12h';
+const LS_ADV = 'vlcEpgAdv';
 
 function storageGet(key, fallback) {
   try { const value = localStorage.getItem(key); return value == null ? fallback : value; }
@@ -824,7 +837,13 @@ function escapeHtml(s) {
 }
 function fmtTime(ms) {
   const d = new Date(ms);
-  return d.getHours().toString().padStart(2,'0') + ':' + d.getMinutes().toString().padStart(2,'0');
+  let h = d.getHours(), m = d.getMinutes();
+  if (state.h12) {
+    const ap = h >= 12 ? 'PM' : 'AM';
+    h = h % 12; if (h === 0) h = 12;
+    return h + ':' + m.toString().padStart(2, '0') + ' ' + ap;
+  }
+  return h.toString().padStart(2, '0') + ':' + m.toString().padStart(2, '0');
 }
 function fmtDate(ms) {
   const d = new Date(ms);
@@ -946,6 +965,9 @@ function openSettings() {
   $('chnoMode').checked = state.chno;
   $('qualitySel').value = state.quality;
   $('loadLastMode').checked = state.loadLast;
+  $('h12Mode').checked = state.h12;
+  $('advMode').checked = state.adv;
+  const _panel = document.querySelector('#overlay .panel'); if (_panel) _panel.classList.toggle('adv-on', state.adv);
   $('dbgMode').checked = state.debug;
   $('arMode').checked = state.autoRestart;
   $('netCache').value = state.netCache;
@@ -986,6 +1008,18 @@ $('loadLastMode').addEventListener('change', e => {
   state.loadLast = e.target.checked;
   storageSet(LS_LASTON, state.loadLast ? '1' : '0');
   toast('Reload last source on start ' + (state.loadLast ? 'on' : 'off'));
+});
+$('h12Mode').addEventListener('change', e => {
+  state.h12 = e.target.checked;
+  storageSet(LS_H12, state.h12 ? '1' : '0');
+  if (state.channels.length) render();
+  toast('12-hour clock ' + (state.h12 ? 'on' : 'off'));
+});
+$('advMode').addEventListener('change', e => {
+  state.adv = e.target.checked;
+  storageSet(LS_ADV, state.adv ? '1' : '0');
+  const p = document.querySelector('#overlay .panel'); if (p) p.classList.toggle('adv-on', state.adv);
+  toast('Advanced settings ' + (state.adv ? 'shown' : 'hidden'));
 });
 $('resetSettings').addEventListener('click', () => {
   if (!confirm('Reset all settings to defaults? (Saved sources are kept)')) return;
@@ -1211,7 +1245,7 @@ function buildRuler(halfHours, pxPerHour, now, width, chW) {
   for (let h = -halfHours; h <= halfHours; h++) {
     const t = new Date(now + h * 3600e3);
     const left = chW + (h + halfHours) * pxPerHour;
-    const label = t.getHours().toString().padStart(2,'0') + ':' + t.getMinutes().toString().padStart(2,'0');
+    const label = fmtTime(t.getTime());
     html += `<div class="tick" style="left:${left}px">${label}</div>`;
   }
   return html + '</div>';
@@ -2214,6 +2248,8 @@ state.hw = storageGet(LS_HW, '0') === '1';
 state.chno = storageGet(LS_CHNO, '1') === '1';
 state.quality = storageGet(LS_QUALITY, 'auto');
 state.loadLast = storageGet(LS_LASTON, '1') === '1';
+state.h12 = storageGet(LS_H12, '0') === '1';
+state.adv = storageGet(LS_ADV, '0') === '1';
 state.debug = storageGet(LS_DEBUG, '0') === '1';
 state.autoRestart = storageGet(LS_AR, '1') === '1';
 state.player = storageGet(LS_PLAYER, 'vlc') === 'web' ? 'web' : 'vlc';
