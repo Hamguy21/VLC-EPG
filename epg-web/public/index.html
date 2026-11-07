@@ -1387,7 +1387,7 @@ function syncGridCell(idx) {
         closeBtn = s.el.querySelector('.gclose'), add = s.el.querySelector('.gadd'),
         loading = s.el.querySelector('.gloading'), controls = s.el.querySelector('.gcontrols'),
         dbgBtn = s.el.querySelector('.gdbg');
-  if (dbgBtn) dbgBtn.style.display = state.adv ? '' : 'none';
+  if (dbgBtn) dbgBtn.style.display = (state.debug && state.adv) ? '' : 'none';
   s.el.classList.toggle('playing', !!s.url);
   s.el.classList.toggle('armed', state._gridArmed === idx);
   loading.style.display = (s.ch && !s.url) ? 'flex' : 'none';
