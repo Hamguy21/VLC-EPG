@@ -607,6 +607,17 @@ function progHasPreferredLang(p) {
   const l = String(state.lang).toLowerCase();
   return p.titles.some(v => String(v.lang || '').toLowerCase() === l);
 }
+// True only when the text we are about to show already IS a title/desc in the
+// target language (compare against what's actually displayed, not any title).
+function shownIsTargetLang(p, shown) {
+  if (!p || !state.lang) return false;
+  const l = String(state.lang).toLowerCase();
+  const s = String(shown || '').trim().toLowerCase();
+  if (!s) return false;
+  const items = [].concat(p.titles || [], p.descs || []);
+  return items.some(v => String(v.lang || '').toLowerCase() === l
+    && String(v.text || v['#text'] || '').trim().toLowerCase() === s);
+}
 // Collect languages actually present in the loaded guide.
 function detectLanguages() {
   const set = new Set();
@@ -682,16 +693,18 @@ async function translateVisible() {
     for (const el of [nameEl, nowTitleEl, ...tileEls]) {
       if (!el) continue;
       if (+el.dataset._gen === transGen) continue;
-      // If this text already comes from the preferred language, skip.
+      const text = el.dataset.tt != null ? el.dataset.tt : el.textContent;
+      if (!text || !text.trim()) { el.dataset._gen = transGen; continue; }
+      // Only skip when what we are about to show is ALREADY in the target
+      // language. (Previously we skipped whenever ANY title carried the target
+      // lang tag, which silently skipped mislabeled/foreign EPG titles.)
       const isTile = el.classList.contains('prog');
       if (isTile) {
         const p = ch && (ch.programs || []).find(x => x.start === parseInt(el.dataset.start,10) && x.stop === parseInt(el.dataset.stop,10));
-        if (progHasPreferredLang(p)) { el.dataset._gen = transGen; continue; }
+        if (p && shownIsTargetLang(p, text)) { el.dataset._gen = transGen; continue; }
       } else if (el === nowTitleEl) {
-        if (progHasPreferredLang(np)) { el.dataset._gen = transGen; continue; }
+        if (np && shownIsTargetLang(np, text)) { el.dataset._gen = transGen; continue; }
       }
-      const text = el.dataset.tt != null ? el.dataset.tt : el.textContent;
-      if (!text || !text.trim()) { el.dataset._gen = transGen; continue; }
       tasks.push(async () => {
         const spin = isTile ? document.createElement('div') : null;
         if (spin) { spin.className = 'trans-spin'; el.appendChild(spin); }
