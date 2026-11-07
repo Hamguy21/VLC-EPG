@@ -231,6 +231,9 @@
     border:1px solid rgba(255,255,255,.15); pointer-events:auto; }
   .dbg-overlay .dbg-line { white-space:pre-wrap; padding:1px 0; word-break:break-word; }
   .dbg-overlay .dbg-err { color:#ff8a8a; background:rgba(255,80,80,.10); border-radius:4px; }
+  .d-err { margin:8px 0 2px; padding:7px 10px; border-radius:8px; font-size:12px; line-height:1.4;
+    color:#ff8a8a; background:rgba(255,80,80,.12); border:1px solid rgba(255,90,90,.35); }
+  .wp-chlist .wcl-err { color:#ffb020; font-size:12px; flex:none; }
   .ctx-menu { position:absolute; z-index:10; background:#161b26; border:1px solid var(--border);
     border-radius:10px; box-shadow:0 8px 30px rgba(0,0,0,.5); min-width:190px; overflow:hidden; }
   .ctx-menu .ctx-item { padding:9px 14px; font-size:13px; cursor:pointer; display:flex; justify-content:space-between; gap:14px; }
@@ -433,6 +436,7 @@
       <div class="d-sub" id="dSub"></div>
       <div class="d-time" id="dTime"></div>
       <div class="d-desc" id="dDesc"></div>
+      <div class="d-err" id="dErr" style="display:none"></div>
       <div class="d-meta" id="dMeta"></div>
     </div>
     <div class="d-side">
@@ -1599,7 +1603,7 @@ async function playWeb(ch) {
   if (mp4Err) {
     dbgLog('hls_fallback', {});
     try { await startHlsPlay(ch); }
-    catch (e2) { showLoader(false); dbgLog('web_failed', { msg: e2.message }); toast('Web player failed: ' + e2.message, true); closeWeb(); }
+    catch (e2) { showLoader(false); dbgLog('web_failed', { msg: e2.message }); setChErr(ch, e2.message); toast('Web player failed: ' + e2.message, true); closeWeb(); }
   }
 }
 function showLoader(on) {
@@ -1627,6 +1631,7 @@ async function startMp4(ch, quiet, tc) {
   const vid = $('wpVideo');
   const r4 = await post('/streammp4', { url: ch.url, buffer: state.webBuffer, tc: !!tc, proxy: effectiveProxy() });
   if (r4.codecs) window._codecs = r4.codecs;
+  clearChErr(ch);
   dbgLog(tc ? 'mp4_relay_tc' : 'mp4_relay', { codecs: r4.codecs || null, buffer: state.webBuffer, tc: !!tc });
   vid._checkedEnded = false; vid._stopStall = false;
   vid.preload = 'auto';
@@ -1781,6 +1786,14 @@ function dbgChanChange(ch, how) {
   if (!ch) return;
   dbgLog('channel_change', { ch: ch.name, how, num: channelNumber(ch) });
 }
+// Per-channel last-error tracking (shown in the drawer + channel list).
+function setChErr(ch, msg) {
+  if (!ch || !ch.url) return;
+  if (!state._chErr) state._chErr = new Map();
+  state._chErr.set(ch.url, { msg, t: Date.now() });
+}
+function clearChErr(ch) { if (ch && state._chErr) state._chErr.delete(ch.url); }
+function chErr(ch) { return (state._chErr && state._chErr.get(ch && ch.url)) || null; }
 function showChno(txt) {
   if (!state.chno) return;
   const el = $('wpChno'); if (!el) return;
@@ -1801,6 +1814,7 @@ function buildChList() {
     `<div class="wcl-item ${i === cur ? 'active' : ''}" data-i="${i}">` +
     `<span class="wcl-num">${i + 1}</span>` +
     (i === cur ? '<span class="wcl-play">▶</span>' : '') +
+    (chErr(ch) ? `<span class="wcl-err" title="${escapeHtml(chErr(ch).msg)}">⚠</span>` : '') +
     `<span class="wcl-name">${escapeHtml(ch.name)}</span></div>`).join('')
     || '<div style="padding:14px;color:#8a94a8">no channels</div>';
   return cur;
@@ -2180,6 +2194,12 @@ function showDetails(ch, p) {
   $('dSub').textContent = ch.name + (p.cat ? ' · ' + p.cat : '');
   $('dTime').textContent = (p.start && p.stop) ? (fmtTime(p.start) + ' – ' + fmtTime(p.stop)) : '';
   $('dDesc').textContent = desc;
+  const derr = $('dErr');
+  if (derr) {
+    const err = chErr(ch);
+    if (err) { derr.style.display = 'block'; derr.textContent = '⚠ Stream error: ' + err.msg; }
+    else derr.style.display = 'none';
+  }
   $('dList').innerHTML = '';
   setDrawerIcon((p.icon && p.icon.trim()) || (ch.logo && ch.logo.trim()));
   renderMeta(p, ch);
