@@ -1,0 +1,2098 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b0e14">
+<meta name="description" content="A local IPTV electronic program guide for M3U playlists, XMLTV schedules, and VLC playback.">
+<title>VLC EPG — TV Guide</title>
+  <link rel="stylesheet" href="theme.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app">
+  <div class="top">
+    <h1>▦ VLC EPG<span class="sub">TV guide</span></h1>
+    <div class="field"><label>M3U playlist</label>
+      <input id="m3u" placeholder="https://iptv-org.github.io/iptv/index.m3u"></div>
+    <div class="field"><label>XMLTV EPG</label>
+      <input id="xmltv" placeholder="https://…/epg.xml (empty → auto-find in playlist header)"></div>
+    <button class="btn" id="load">Load guide</button>
+    <button class="btn ghost" id="sample">Sample</button>
+    <button class="btn ghost" id="grab" title="Auto-fetch matching EPG guides for these channels">⚡ Auto EPG</button>
+    <button class="btn ghost" id="saveSrc" title="Save the current playlist/EPG as a named source">+ Save</button>
+    <button class="btn ghost" id="settingsBtn" title="Settings" aria-label="Open settings">⚙ Settings</button>
+    <div class="field"><label>Saved sources (Ctrl-click to select several)</label>
+      <select id="saved" multiple size="6"><option value="">— none —</option></select></div>
+    <button class="btn ghost small" id="loadSaved" title="Load selected source">Load</button>
+    <button class="btn ghost small" id="delSaved" title="Delete selected source">Delete</button>
+    <button class="btn ghost small" id="editSaved" title="Edit selected source name">Rename</button>
+    <div class="status" id="status" role="status" aria-live="polite">Enter a playlist + EPG, or load the sample.</div>
+  </div>
+
+  <div class="nowbar" id="nowbar" style="display:none">
+    <span class="pulse"></span>
+    <span class="nb-ch" id="nbCh"></span>
+    <span class="nb-prog" id="nbProg">▶</span>
+    <span class="nb-time" id="nbTime"></span>
+  </div>
+
+  <div class="bar">
+    <span class="grp">Group:</span><select id="group"><option value="">All channels</option></select>
+    <span class="grp">Filter:</span>
+    <select id="filter">
+      <option value="all" selected>All</option>
+      <option value="fav">Favorites</option>
+      <option value="epg">With EPG</option>
+    </select>
+    <span class="grp">Search:</span><input type="text" id="q" placeholder="channel or program…">
+    <span class="grp">Window:</span>
+    <select id="window">
+      <option value="2">±2 h</option><option value="3" selected>±3 h</option>
+      <option value="6">±6 h</option><option value="12">±12 h</option>
+    </select>
+    <span class="grp">Channel:</span>
+    <span class="jumpwrap">
+      <input type="text" id="chJump" placeholder="Jump to channel…" autocomplete="off">
+      <div class="jump-results" id="chJumpResults"></div>
+    </span>
+    <span class="hint">click a channel or program to watch · ★ = favorite</span>
+    <span class="grp">Player:</span>
+    <span class="seg" id="playerSeg">
+      <button class="seg-btn" data-player="vlc">VLC</button>
+      <button class="seg-btn" data-player="web">Web</button>
+    </span>
+  </div>
+
+  <div class="stage" id="stage" tabindex="0" aria-label="Electronic program guide">
+    <div class="placeholder"><div class="big">📺</div>
+      <div>EPG grid appears here</div></div>
+  </div>
+</div>
+
+<div class="details" id="details" role="region" aria-label="Program details" aria-hidden="true">
+  <div class="d-head">
+    <div class="d-title" id="dTitle"></div>
+    <button class="d-close" id="dClose" title="Close">×</button>
+  </div>
+  <div class="d-body">
+    <div class="d-main">
+      <div class="d-icon" id="dIcon" style="display:none"><img id="dIconImg" alt="" class="hidden"></div>
+      <div class="d-sub" id="dSub"></div>
+      <div class="d-time" id="dTime"></div>
+      <div class="d-desc" id="dDesc"></div>
+      <div class="d-err" id="dErr" style="display:none"></div>
+      <div class="d-meta" id="dMeta"></div>
+    </div>
+    <div class="d-side">
+      <div class="d-list" id="dList"></div>
+    </div>
+  </div>
+  <div class="d-row">
+    <button class="btn" id="dPlay">▶ Play (VLC)</button>
+    <button class="btn ghost" id="dWeb">🌐 Web player</button>
+  </div>
+</div>
+
+<!-- Settings modal -->
+<div class="overlay" id="overlay" role="presentation">
+  <div class="panel" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+    <h2 id="settingsTitle">Settings</h2>
+    <div class="p-sub">Changes apply immediately.</div>
+    <div class="p-row">
+      <label class="fmt-opt" style="display:inline-flex;gap:8px">
+        <input type="checkbox" id="advMode"> Show advanced settings
+      </label>
+    </div>
+
+    <div class="p-section">Playback · VLC</div>
+    <div class="p-row">
+      <span class="p-lbl">Player</span>
+      <select id="playerSel" class="pref-lang">
+        <option value="vlc">VLC</option>
+        <option value="web">Web player</option>
+      </select>
+    </div>
+    <div class="p-row adv">
+      <span class="p-lbl">Network cache (ms) — VLC only; raise if video drops after a few seconds</span>
+      <input type="number" id="netCache" min="300" max="10000" step="100" style="width:100%;padding:7px 10px;border-radius:8px;border:1px solid var(--border);background:var(--panel2);color:var(--text);font-size:13px">
+    </div>
+    <div class="p-row">
+      <label class="fmt-opt" style="display:inline-flex;gap:8px">
+        <input type="checkbox" id="fsMode"> Open channels in fullscreen (VLC and Web)
+      </label>
+    </div>
+    <div class="p-row adv">
+      <label class="fmt-opt" style="display:inline-flex;gap:8px">
+        <input type="checkbox" id="hwMode"> Hardware decoding (VLC, DXVA2)
+      </label>
+    </div>
+    <div class="p-row adv">
+      <label class="fmt-opt" style="display:inline-flex;gap:8px">
+        <input type="checkbox" id="arMode"> Auto-restart segmented channels (e.g. Pluto)
+      </label>
+    </div>
+    <div class="p-row adv">
+      <span class="p-lbl">Stream quality (preference; VLC uses adaptive HLS)</span>
+      <select id="qualitySel" class="pref-lang">
+        <option value="auto">Auto</option>
+        <option value="high">High</option>
+        <option value="medium">Medium</option>
+        <option value="low">Low</option>
+      </select>
+    </div>
+
+    <div class="p-divider"></div>
+    <div class="p-section">Web player</div>
+    <div class="p-row adv">
+      <label class="fmt-opt" style="display:inline-flex;gap:8px">
+        <input type="checkbox" id="relayMode"> Use FFmpeg relay (fixes streams that drop, e.g. Pluto)
+      </label>
+    </div>
+    <div class="p-row">
+      <span class="p-lbl">Web player buffer (seconds) — larger rides out longer blips</span>
+      <input type="number" id="webBuffer" min="5" max="90" step="5" style="width:100%;padding:7px 10px;border-radius:8px;border:1px solid var(--border);background:var(--panel2);color:var(--text);font-size:13px">
+    </div>
+    <div class="p-row">
+      <label class="fmt-opt" style="display:inline-flex;gap:8px">
+        <input type="checkbox" id="chnoMode"> Show channel number on video (auto-hides)
+      </label>
+    </div>
+    <div class="p-row adv">
+      <label class="fmt-opt" style="display:inline-flex;gap:8px">
+        <input type="checkbox" id="proxyEnableMode"> Use proxy for geo-blocked streams
+      </label>
+      <span class="p-lbl">Stream proxy (HTTP) — e.g. http://127.0.0.1:1080</span>
+      <input type="text" id="proxySel" placeholder="http://127.0.0.1:1080" style="width:100%;padding:7px 10px;border-radius:8px;border:1px solid var(--border);background:var(--panel2);color:var(--text);font-size:13px">
+      <button class="btn ghost small" id="probeProxyBtn" style="margin-top:6px">⟳ Probe public proxies</button>
+      <select id="proxyResults" class="pref-lang" style="display:none;margin-top:6px"></select>
+      <label class="fmt-opt" style="display:inline-flex;gap:8px;margin-top:6px">
+        <input type="checkbox" id="vpnMode"> I use my system VPN instead (bypass HTTP proxy)
+      </label>
+      <div id="proxyHint" style="margin-top:4px;font-size:11px;color:var(--muted)"></div>
+    </div>
+    <div class="p-row adv">
+      <span class="p-lbl">Connection speed test</span>
+      <button class="btn ghost small" id="speedtestBtn" style="margin-top:6px">▶ Run speed test</button>
+      <div id="speedResult" style="margin-top:6px;font-size:12px;color:var(--muted)"></div>
+    </div>
+
+    <div class="p-divider"></div>
+    <div class="p-section">Display</div>
+    <div class="p-row">
+      <span class="p-lbl">Date format</span>
+      <div class="fmt-opts" id="fmtOpts">
+        <label class="fmt-opt"><input type="radio" name="dfmt" value="DMY"> D / M / Y</label>
+        <label class="fmt-opt"><input type="radio" name="dfmt" value="YMD"> Y / M / D</label>
+        <label class="fmt-opt"><input type="radio" name="dfmt" value="MDY"> M / D / Y</label>
+      </div>
+    </div>
+    <div class="p-row">
+      <label class="fmt-opt" style="display:inline-flex;gap:8px">
+        <input type="checkbox" id="tvMode"> TV mode (bigger UI for remote / distance)
+      </label>
+    </div>
+    <div class="p-row">
+      <label class="fmt-opt" style="display:inline-flex;gap:8px">
+        <input type="checkbox" id="h12Mode"> 12-hour clock (AM/PM)
+      </label>
+    </div>
+
+    <div class="p-divider"></div>
+    <div class="p-section">Startup</div>
+    <div class="p-row">
+      <label class="fmt-opt" style="display:inline-flex;gap:8px">
+        <input type="checkbox" id="loadLastMode"> Reload the last source on start
+      </label>
+    </div>
+
+    <div class="p-divider"></div>
+    <div class="p-section">Language &amp; translation</div>
+    <div class="p-row">
+      <span class="p-lbl">Preferred language</span>
+      <select id="prefLang" class="pref-lang"></select>
+      <div style="margin-top:6px;font-size:12px;color:var(--muted)" id="langHint"></div>
+    </div>
+    <div class="p-row">
+      <label class="fmt-opt" style="display:inline-flex;gap:8px">
+        <input type="checkbox" id="autoTranslate"> Auto-translate missing programmes to my language
+      </label>
+      <button class="btn ghost small" id="retranslate" style="margin-top:8px" title="Clear the translation cache and re-translate the visible programmes">⟳ Retranslate now</button>
+    </div>
+
+    <div class="p-divider"></div>
+    <div class="p-section">Debug</div>
+    <div class="p-row adv">
+      <label class="fmt-opt" style="display:inline-flex;gap:8px">
+        <input type="checkbox" id="dbgMode"> Debug mode (record player/server events; Debug in the video menu)
+      </label>
+    </div>
+
+    <div class="p-actions">
+      <button class="btn ghost" id="resetSettings" title="Clear all saved settings (not your saved sources)">Reset settings</button>
+      <button class="btn ghost" id="settClose">Close</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<!-- Web player overlay -->
+<div class="webplayer" id="webplayer" style="display:none">
+  <div class="wp-head">
+    <span class="wp-title" id="wpTitle"></span>
+    <div class="wp-tools">
+      <button class="wp-tool" id="wpPrev" title="Previous channel">◀</button>
+      <button class="wp-tool" id="wpNext" title="Next channel">▶</button>
+      <button class="wp-tool" id="wpListBtn" title="Channel list">▦</button>
+    </div>
+    <button class="d-close" id="wpClose" title="Close">×</button>
+  </div>
+  <video id="wpVideo" controls autoplay playsinline></video>
+  <div class="wp-chno" id="wpChno"></div>
+  <div class="wp-chlist hidden" id="wpChList"></div>
+  <div class="wp-loading" id="wpLoading" style="display:flex">
+    <div class="spin"></div><div class="lbl">Buffering…</div>
+  </div>
+  <div class="wp-err" id="wpError" style="display:none"></div>
+  <div class="stats-overlay" id="statsOverlay" style="display:none"></div>
+  <div class="dbg-overlay" id="dbgOverlay" style="display:none"></div>
+  <div class="ctx-menu" id="ctxMenu" style="display:none"></div>
+</div>
+
+<script src="/vendor/hls.min.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const stage = $('stage');
+const state = { channels: [], groups: [], now: Date.now(), fav: new Set(), current: null, dfmt: 'DMY', sel: null, view: [], lang: 'en', translate: false, fullscreen: false, netCache: 3000, relay: false, player: 'vlc', webBuffer: 30, hw: false, quality: 'auto', debug: false, autoRestart: true, chno: true, loadLast: true, h12: false, adv: false, useProxy: false, vpn: false, proxy: '' };
+let timer = null, toastTimer = null, activeLoadId = 0;
+const LS_SOURCES = 'vlcEpgSources';
+const LS_FAV = 'vlcEpgFavorites';
+const LS_DFMT = 'vlcEpgDateFormat';
+const LS_TV = 'vlcEpgTvMode';
+const LS_LANG = 'vlcEpgLang';
+const LS_TRANS = 'vlcEpgTranslate';
+const LS_FS = 'vlcEpgFullscreen';
+const LS_NETCACHE = 'vlcEpgNetCache';
+const LS_RELAY = 'vlcEpgRelay';
+const LS_PLAYER = 'vlcEpgPlayer';
+const LS_HW = 'vlcEpgHw';
+const LS_LAST = 'vlcEpgLastSrc';
+const LS_DEBUG = 'vlcEpgDebug';
+const LS_AR = 'vlcEpgAutoRestart';
+const LS_CHNO = 'vlcEpgChno';
+const LS_QUALITY = 'vlcEpgQuality';
+const LS_LASTON = 'vlcEpgLoadLast';
+const LS_H12 = 'vlcEpg12h';
+const LS_ADV = 'vlcEpgAdv';
+const LS_PROXY = 'vlcEpgProxy';
+const LS_USEPROXY = 'vlcEpgUseProxy';
+const LS_VPN = 'vlcEpgVpn';
+const LS_WEBUF = 'vlcEpgWebBuffer';
+
+function storageGet(key, fallback) {
+  try { const value = localStorage.getItem(key); return value == null ? fallback : value; }
+  catch (_) { return fallback; }
+}
+function storageSet(key, value) {
+  try { localStorage.setItem(key, value); return true; }
+  catch (_) { toast('Browser storage is unavailable or full', true); return false; }
+}
+function loadFav() {
+  try {
+    const value = JSON.parse(storageGet(LS_FAV, '[]'));
+    state.fav = new Set(Array.isArray(value) ? value.filter(v => typeof v === 'string') : []);
+  } catch (_) { state.fav = new Set(); }
+}
+function saveFav() { storageSet(LS_FAV, JSON.stringify([...state.fav])); }
+function loadDfmt() { const v = storageGet(LS_DFMT, 'DMY'); if (['YMD','MDY'].includes(v)) state.dfmt = v; }
+function saveDfmt() { storageSet(LS_DFMT, state.dfmt); }
+function loadTv() { if (storageGet(LS_TV, '0') === '1') document.body.classList.add('tv'); }
+function applyTv(on) { document.body.classList.toggle('tv', on); storageSet(LS_TV, on ? '1' : '0'); }
+
+/* ---------- language + translation ---------- */
+const LANG_NAMES = {
+  en:'English', es:'Spanish', fr:'French', de:'German', pt:'Portuguese', it:'Italian',
+  nl:'Dutch', tr:'Turkish', ru:'Russian', ar:'Arabic', hi:'Hindi', zh:'Chinese',
+  ja:'Japanese', ko:'Korean', pl:'Polish', id:'Indonesian', ms:'Malay', th:'Thai',
+  vi:'Vietnamese', sv:'Swedish', da:'Danish', no:'Norwegian', fi:'Finnish', cs:'Czech',
+  el:'Greek', hu:'Hungarian', ro:'Romanian', uk:'Ukrainian', he:'Hebrew', ca:'Catalan',
+  bg:'Bulgarian', hr:'Croatian', sr:'Serbian', sk:'Slovak', sl:'Slovenian',
+  lt:'Lithuanian', lv:'Latvian', et:'Estonian', is:'Icelandic', sq:'Albanian',
+  bs:'Bosnian', mk:'Macedonian', mt:'Maltese', ga:'Irish', cy:'Welsh', eu:'Basque',
+  gl:'Galician', fa:'Persian', ur:'Urdu', bn:'Bengali', ta:'Tamil', te:'Telugu',
+  ml:'Malayalam', kn:'Kannada', mr:'Marathi', gu:'Gujarati', pa:'Punjabi',
+  sw:'Swahili', tl:'Tagalog', lo:'Lao', km:'Khmer', my:'Burmese', ne:'Nepali',
+  si:'Sinhala', az:'Azerbaijani', ka:'Georgian', hy:'Armenian', kk:'Kazakh',
+  uz:'Uzbek', ps:'Pashto', am:'Amharic', ha:'Hausa', yo:'Yoruba', ig:'Igbo',
+  zu:'Zulu', af:'Afrikaans', st:'Sotho', sn:'Shona', mg:'Malagasy', jw:'Javanese',
+  su:'Sundanese', ceb:'Cebuano'
+};
+// Pick the best variant for the preferred language (fallback EN, then first).
+function langVariant(variants, lang) {
+  if (!variants || !variants.length) return '';
+  const l = String(lang || '').toLowerCase();
+  const p = variants.find(v => String(v.lang || '').toLowerCase() === l);
+  if (p) return p.text;
+  const e = variants.find(v => String(v.lang || '').toLowerCase() === 'en');
+  if (e) return e.text;
+  return variants[0].text;
+}
+function progTitle(p) { return langVariant(p && p.titles, state.lang) || (p && p.title) || ''; }
+function progDesc(p) { return langVariant(p && p.descs, state.lang) || (p && p.desc) || ''; }
+// True when the program already has a title in the preferred language, so no
+// translation should be requested for it.
+function progHasPreferredLang(p) {
+  if (!p || !state.lang || !Array.isArray(p.titles)) return false;
+  const l = String(state.lang).toLowerCase();
+  return p.titles.some(v => String(v.lang || '').toLowerCase() === l);
+}
+// True only when the text we are about to show already IS a title/desc in the
+// target language (compare against what's actually displayed, not any title).
+function shownIsTargetLang(p, shown) {
+  if (!p || !state.lang) return false;
+  const l = String(state.lang).toLowerCase();
+  const s = String(shown || '').trim().toLowerCase();
+  if (!s) return false;
+  const items = [].concat(p.titles || [], p.descs || []);
+  return items.some(v => String(v.lang || '').toLowerCase() === l
+    && String(v.text || v['#text'] || '').trim().toLowerCase() === s);
+}
+// Collect languages actually present in the loaded guide.
+function detectLanguages() {
+  const set = new Set();
+  for (const ch of state.channels) for (const p of (ch.programs || [])) {
+    for (const t of (p.titles || [])) if (t.lang) set.add(t.lang);
+    for (const d of (p.descs || [])) if (d.lang) set.add(d.lang);
+  }
+  return [...set].filter(Boolean).sort();
+}
+function fillLangSelect() {
+  const sel = $('prefLang');
+  const langs = detectLanguages();
+  const choices = langs.length ? langs : ['en'];
+  const all = new Set([...choices, 'en', ...Object.keys(LANG_NAMES)]);
+  sel.innerHTML = [...all].map(l =>
+    `<option value="${l}" ${l === state.lang ? 'selected' : ''}>${LANG_NAMES[l] || l.toUpperCase()}</option>`).join('');
+  $('langHint').textContent = langs.length
+    ? 'Languages in this EPG: ' + langs.map(l => LANG_NAMES[l] || l.toUpperCase()).join(', ')
+    : 'Load a guide to see available languages.';
+}
+// Best-effort translation with an in-memory cache.
+const transCache = new Map();
+async function translateText(text, to) {
+  if (!text || !to) return text;
+  const key = text + '\u0001' + to;
+  if (transCache.has(key)) return transCache.get(key);
+  try {
+    const r = await post('/translate', { text, to });
+    const out = (r && r.text) || text;
+    transCache.set(key, out);
+    return out;
+  } catch (_) { return text; }
+}
+
+// ---- grid-tile translation (visible programs only) ----
+let transGen = 0;              // bumped when language/toggle changes
+let transScrollT = null;
+function runPool(tasks, limit) {
+  let i = 0;
+  const workers = Array.from({ length: Math.min(limit, tasks.length) }, async () => {
+    while (i < tasks.length) await tasks[i++]();
+  });
+  return Promise.all(workers);
+}
+function visibleRows() {
+  const st = stage, h = rowHeight(), ruler = rulerHeight();
+  const topIdx = Math.max(0, Math.floor((st.scrollTop - ruler) / h));
+  const bottomIdx = Math.min(state.view.length - 1, Math.ceil((st.scrollTop + st.clientHeight - ruler) / h));
+  const rows = [];
+  for (let i = topIdx; i <= bottomIdx; i++) {
+    const el = document.getElementById('row-' + i);
+    if (el) rows.push({ el, i });
+  }
+  return rows;
+}
+async function translateVisible() {
+  if (!state.translate) return;
+  const tasks = [];
+  for (const { el: row, i } of visibleRows()) {
+    const ch = state.view[i];
+    // channel column: name + now/next title
+    const nameEl = row.querySelector('.ch .name');
+    const nowTitleEl = row.querySelector('.ch .np-title');
+    const np = ch ? nowProgram(ch, Date.now()) : null;
+    // program tiles in this row that are within the horizontal viewport
+    const stRect = stage.getBoundingClientRect();
+    const leftBound = stRect.left + (document.body.classList.contains('tv') ? 300 : 240);
+    const rightBound = stRect.right;
+    const tileEls = [...row.querySelectorAll('.prog:not(.noinfo)')].filter(el => {
+      const r = el.getBoundingClientRect();
+      return r.right >= leftBound && r.left <= rightBound;
+    });
+    for (const el of [nameEl, nowTitleEl, ...tileEls]) {
+      if (!el) continue;
+      if (+el.dataset._gen === transGen) continue;
+      const text = el.dataset.tt != null ? el.dataset.tt : el.textContent;
+      if (!text || !text.trim()) { el.dataset._gen = transGen; continue; }
+      // Only skip when what we are about to show is ALREADY in the target
+      // language. (Previously we skipped whenever ANY title carried the target
+      // lang tag, which silently skipped mislabeled/foreign EPG titles.)
+      const isTile = el.classList.contains('prog');
+      if (isTile) {
+        const p = ch && (ch.programs || []).find(x => x.start === parseInt(el.dataset.start,10) && x.stop === parseInt(el.dataset.stop,10));
+        if (p && shownIsTargetLang(p, text)) { el.dataset._gen = transGen; continue; }
+      } else if (el === nowTitleEl) {
+        if (np && shownIsTargetLang(np, text)) { el.dataset._gen = transGen; continue; }
+      }
+      tasks.push(async () => {
+        const spin = isTile ? document.createElement('div') : null;
+        if (spin) { spin.className = 'trans-spin'; el.appendChild(spin); }
+        try {
+          const nt = await translateText(text, state.lang);
+          if (nt && nt !== text) {
+            if (isTile) {
+              el.dataset.tt = nt;
+              const ttEl = el.querySelector('.tt'); if (ttEl) ttEl.textContent = nt;
+            } else {
+              el.textContent = nt;
+            }
+          }
+          el.dataset._gen = transGen;
+        } finally {
+          if (spin) spin.remove();
+        }
+      });
+    }
+  }
+  if (tasks.length) await runPool(tasks, 4);
+}
+function scheduleTranslate() {
+  clearTimeout(transScrollT);
+  transScrollT = setTimeout(translateVisible, 200);
+}
+// Call after render() when auto-translate is on.
+function translateAfterRender() { if (state.translate) translateVisible(); }
+
+function toast(msg, isErr) {
+  const t = $('toast'); t.textContent = String(msg); t.classList.add('show');
+  t.style.background = isErr ? '#3a2226' : '#222a38';
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 3200);
+}
+async function post(path, body, options = {}) {
+  const controller = options.signal ? null : new AbortController();
+  const signal = options.signal || controller.signal;
+  const timeout = controller ? setTimeout(() => controller.abort(), 60000) : null;
+  try {
+    const r = await fetch(path, { method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(body || {}), signal, cache:'no-store' });
+    const raw = await r.text();
+    let j;
+    try { j = raw ? JSON.parse(raw) : {}; }
+    catch (_) { throw new Error('Server returned an invalid response (' + r.status + ')'); }
+    if (!r.ok) throw new Error(j.error || ('Request failed (' + r.status + ')'));
+    return j;
+  } catch (e) {
+    if (e.name === 'AbortError') throw new Error('Request timed out or was cancelled');
+    throw e;
+  } finally { if (timeout) clearTimeout(timeout); }
+}
+function setStatus(text, kind) {
+  const s = $('status'); s.textContent = text; s.className = 'status ' + (kind || '');
+}
+function escapeHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
+    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function fmtTime(ms) {
+  const d = new Date(ms);
+  let h = d.getHours(), m = d.getMinutes();
+  if (state.h12) {
+    const ap = h >= 12 ? 'PM' : 'AM';
+    h = h % 12; if (h === 0) h = 12;
+    return h + ':' + m.toString().padStart(2, '0') + ' ' + ap;
+  }
+  return h.toString().padStart(2, '0') + ':' + m.toString().padStart(2, '0');
+}
+function fmtDate(ms) {
+  const d = new Date(ms);
+  const Y = d.getFullYear(), M = (d.getMonth()+1).toString().padStart(2,'0'), D = d.getDate().toString().padStart(2,'0');
+  if (state.dfmt === 'YMD') return `${Y}/${M}/${D}`;
+  if (state.dfmt === 'MDY') return `${M}/${D}/${Y}`;
+  return `${D}/${M}/${Y}`;
+}
+// Normalize an XMLTV <date> value into a human-readable year string.
+function fmtYear(v) {
+  const s = String(v || '').trim();
+  if (/^\d{8}$/.test(s)) return s.slice(0, 4);          // 20261105 -> 2026
+  if (/^\d{4}$/.test(s)) return s;                       // 2026 -> 2026
+  if (/^\d{4}-\d{2}/.test(s)) return s.slice(0, 4);      // 2026-11-05 -> 2026
+  return s;
+}
+function fmtDateTime(ms) { return fmtDate(ms) + ' ' + fmtTime(ms); }
+function nowProgram(ch, at) {
+  for (const p of (ch.programs || [])) {
+    if (p.start <= at && p.stop > at) return p;
+    if (p.start > at) break;
+  }
+  return null;
+}
+
+/* ---------- sources (add / load / rename / delete) ---------- */
+function savedSources() {
+  try {
+    const value = JSON.parse(storageGet(LS_SOURCES, '[]'));
+    return Array.isArray(value) ? value.filter(s => s && typeof s.name === 'string' && typeof s.m3u === 'string') : [];
+  } catch (_) { return []; }
+}
+function writeSources(list) { return storageSet(LS_SOURCES, JSON.stringify(list)); }
+function selectedSources() {
+  const sel = [...$('saved').selectedOptions].map(o => o.value).filter(Boolean);
+  const all = savedSources();
+  return sel.map(name => all.find(s => s.name === name)).filter(Boolean);
+}
+function refreshSavedDropdown(selectedName) {
+  const dd = $('saved'); const list = savedSources();
+  dd.innerHTML = '<option value="">— none —</option>' + list.map(s =>
+    `<option ${s.name === selectedName ? 'selected' : ''}>${escapeHtml(s.name)}</option>`).join('');
+}
+// Save current playlist/EPG as a named source (add or overwrite)
+$('saveSrc').addEventListener('click', () => {
+  const m3u = $('m3u').value.trim();
+  const xmltv = $('xmltv').value.trim();
+  if (!m3u) { toast('Enter a playlist first', true); return; }
+  let name = prompt('Name this saved source:', '');
+  if (!name) return;
+  name = name.trim();
+  if (!name) return;
+  const list = savedSources();
+  const existing = list.findIndex(s => s.name === name);
+  if (existing >= 0) {
+    if (!confirm('A source named "' + name + '" already exists. Overwrite it?')) return;
+    list[existing] = { name, m3u, xmltv };
+  } else {
+    list.push({ name, m3u, xmltv });
+  }
+  writeSources(list);
+  refreshSavedDropdown(name);
+  toast('Saved: ' + name);
+});
+// Load the selected source(s) — merge multiple into one grid
+$('loadSaved').addEventListener('click', async () => {
+  const sel = selectedSources();
+  if (!sel.length) { toast('Select a saved source first', true); return; }
+  if (sel.length === 1) {
+    const s = sel[0];
+    $('m3u').value = s.m3u;
+    $('xmltv').value = s.xmltv || '';
+    try { await loadGuide(); storageSet(LS_LAST, s.name); } catch (_) {}
+    return;
+  }
+  // merge multiple playlists
+  setStatus('Loading ' + sel.length + ' playlists…'); showLoading(true);
+  try {
+    let allCh = []; const groups = new Set();
+    for (const s of sel) {
+      const m = await post('/parse/m3u', { src: s.m3u });
+      for (const c of m.channels) {
+        if (!allCh.some(x => x.url === c.url)) allCh.push(c);
+      }
+      (m.groupList || []).forEach(g => groups.add(g));
+    }
+    // merge EPG for whichever selected sources carry one
+    let withEpg = 0;
+    for (const s of sel) {
+      if (!s.xmltv) continue;
+      try {
+        const match = await post('/match', { m3u: s.m3u, xmltv: s.xmltv });
+        const byUrl = new Map(match.channels.map(c => [c.url, c]));
+        allCh = allCh.map(c => byUrl.has(c.url) ? { ...byUrl.get(c.url), url: c.url } : c);
+        withEpg += match.matched;
+      } catch (_) {}
+    }
+    state.channels = allCh.map((c, i) => ({ ...c, _src: i }));
+    state.groups = [...groups];
+    $('m3u').value = sel.map(s => s.m3u).join(',');
+    $('xmltv').value = '';
+    storageSet(LS_LAST, sel[0].name);
+    render();
+    setStatus(allCh.length + ' channels merged from ' + sel.length + ' sources · ' + withEpg + ' with EPG');
+  } catch (e) { setStatus('Merge failed: ' + e.message, 'err'); }
+  finally { showLoading(false); }
+});
+
+// ---- Settings modal ----
+function openSettings() {
+  document.querySelectorAll('.fmt-opt input[name="dfmt"]').forEach(r => {
+    const sel = r.value === state.dfmt;
+    r.checked = sel;
+    r.closest('.fmt-opt').classList.toggle('sel', sel);
+  });
+  $('tvMode').checked = document.body.classList.contains('tv');
+  $('fsMode').checked = state.fullscreen;
+  $('hwMode').checked = state.hw;
+  $('chnoMode').checked = state.chno;
+  $('qualitySel').value = state.quality;
+  $('loadLastMode').checked = state.loadLast;
+  $('h12Mode').checked = state.h12;
+  $('advMode').checked = state.adv;
+  $('proxySel').value = state.proxy || '';
+  $('proxyEnableMode').checked = state.useProxy;
+  $('vpnMode').checked = state.vpn;
+  updateProxyUI();
+  const _panel = document.querySelector('#overlay .panel'); if (_panel) _panel.classList.toggle('adv-on', state.adv);
+  $('dbgMode').checked = state.debug;
+  $('arMode').checked = state.autoRestart;
+  $('netCache').value = state.netCache;
+  $('webBuffer').value = state.webBuffer;
+  $('relayMode').checked = state.relay;
+  $('playerSel').value = state.player;
+  updatePlayerSeg();
+  $('autoTranslate').checked = state.translate;
+  fillLangSelect();
+  $('overlay').classList.add('open');
+}
+function closeSettings() { $('overlay').classList.remove('open'); }
+$('settingsBtn').addEventListener('click', openSettings);
+$('settClose').addEventListener('click', closeSettings);
+$('tvMode').addEventListener('change', e => { applyTv(e.target.checked); });
+$('fsMode').addEventListener('change', e => {
+  state.fullscreen = e.target.checked;
+  storageSet(LS_FS, state.fullscreen ? '1' : '0');
+  toast('Channels open ' + (state.fullscreen ? 'fullscreen' : 'in a window'));
+});
+$('hwMode').addEventListener('change', e => {
+  state.hw = e.target.checked;
+  storageSet(LS_HW, state.hw ? '1' : '0');
+  toast('Hardware decoding ' + (state.hw ? 'on' : 'off') + ' (VLC)');
+});
+$('chnoMode').addEventListener('change', e => {
+  state.chno = e.target.checked;
+  storageSet(LS_CHNO, state.chno ? '1' : '0');
+  if (!state.chno) { const cn = $('wpChno'); if (cn) cn.classList.remove('show'); }
+  toast('Channel number ' + (state.chno ? 'on' : 'off'));
+});
+$('qualitySel').addEventListener('change', e => {
+  state.quality = e.target.value;
+  storageSet(LS_QUALITY, state.quality);
+  toast('Stream quality preference: ' + state.quality);
+});
+$('loadLastMode').addEventListener('change', e => {
+  state.loadLast = e.target.checked;
+  storageSet(LS_LASTON, state.loadLast ? '1' : '0');
+  toast('Reload last source on start ' + (state.loadLast ? 'on' : 'off'));
+});
+$('h12Mode').addEventListener('change', e => {
+  state.h12 = e.target.checked;
+  storageSet(LS_H12, state.h12 ? '1' : '0');
+  if (state.channels.length) render();
+  refreshOpenDetails();
+  toast('12-hour clock ' + (state.h12 ? 'on' : 'off'));
+});
+$('advMode').addEventListener('change', e => {
+  state.adv = e.target.checked;
+  storageSet(LS_ADV, state.adv ? '1' : '0');
+  const p = document.querySelector('#overlay .panel'); if (p) p.classList.toggle('adv-on', state.adv);
+  toast('Advanced settings ' + (state.adv ? 'shown' : 'hidden'));
+});
+$('proxySel').addEventListener('change', e => {
+  state.proxy = String(e.target.value || '').trim();
+  storageSet(LS_PROXY, state.proxy);
+  toast(state.proxy ? 'Proxy set: ' + state.proxy : 'Proxy cleared');
+});
+function effectiveProxy() { return (state.useProxy && !state.vpn) ? state.proxy : ''; }
+function updateProxyUI() {
+  const use = state.useProxy && !state.vpn;
+  const inp = $('proxySel'), btn = $('probeProxyBtn'), sel = $('proxyResults'), hint = $('proxyHint');
+  if (!inp) return;
+  inp.disabled = !use; btn.disabled = !use; sel.disabled = !use;
+  if (state.vpn) hint.textContent = 'Your system VPN routes the traffic — no HTTP proxy applied.';
+  else if (!state.useProxy) hint.textContent = 'Proxy is off. Enable "Use proxy" to route geo-blocked streams through it.';
+  else hint.textContent = 'Proxy enabled — streams will go through ' + (state.proxy || '(set one below)');
+}
+$('proxyEnableMode').addEventListener('change', e => {
+  state.useProxy = e.target.checked;
+  storageSet(LS_USEPROXY, state.useProxy ? '1' : '0');
+  updateProxyUI();
+  toast('Proxy ' + (state.useProxy ? 'enabled' : 'disabled'));
+});
+$('vpnMode').addEventListener('change', e => {
+  state.vpn = e.target.checked;
+  storageSet(LS_VPN, state.vpn ? '1' : '0');
+  updateProxyUI();
+  toast('Using system VPN ' + (state.vpn ? 'on' : 'off'));
+});
+$('probeProxyBtn').addEventListener('click', async () => {
+  const sel = $('proxyResults'), hint = $('proxyHint'), btn = $('probeProxyBtn');
+  hint.textContent = 'Probing public proxies… (may take ~15s)';
+  sel.style.display = 'none';
+  btn.disabled = true;
+  try {
+    const r = await (await fetch('/proxylist?limit=10&timeout=3500')).json();
+    const list = r.proxies || [];
+    btn.disabled = false;
+    if (!list.length) { hint.textContent = 'No reachable HTTP proxies right now (free proxies are unreliable — retry or use your own VPN).'; return; }
+    sel.innerHTML = '<option value="">Choose a working proxy…</option>' +
+      list.map(pv `<option value="http://${p.host}:${p.port}">${p.host}:${p.port} (${p.ms}ms)</option>`).join('');
+    sel.style.display = 'block';
+    hint.textContent = list.length + ' reachable of ' + r.total + ' scraped · only bypasses geo-blocks if the proxy is in the allowed region.';
+    sel.onchange = () => {
+      if (sel.value) { $('proxySel').value = sel.value; state.proxy = sel.value; storageSet(LS_PROXY, sel.value); toast('Proxy set: ' + sel.value); }
+    };
+  } catch (e) {
+    btn.disabled = false;
+    hint.textContent = 'Probe failed: ' + e.message;
+  }
+});
+$('resetSettings').addEventListener('click', () => {
+  if (!confirm('Reset all settings to defaults? (Saved sources are kept)')) return;
+  const keep = new Set(['vlcEpgSources', 'vlcEpgLastSrc']);
+  const out = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (k && k.startsWith('vlcEpg') && !keep.has(k)) out.push(k);
+  }
+  out.forEach(k => localStorage.removeItem(k));
+  location.reload();
+});
+$('dbgMode').addEventListener('change', e => {
+  state.debug = e.target.checked;
+  storageSet(LS_DEBUG, state.debug ? '1' : '0');
+  if (state.debug) { dbgLog('debug_on', {}); toast('Debug mode on — events are being recorded'); }
+  else toast('Debug mode off');
+});
+$('arMode').addEventListener('change', e => {
+  state.autoRestart = e.target.checked;
+  storageSet(LS_AR, state.autoRestart ? '1' : '0');
+  toast('Auto-restart segmented channels ' + (state.autoRestart ? 'on' : 'off'));
+});
+$('speedtestBtn').addEventListener('click', runSpeedTest);
+$('netCache').addEventListener('change', e => {
+  let v = parseInt(e.target.value, 10);
+  if (!v || v < 300) v = 300;
+  if (v > 10000) v = 10000;
+  state.netCache = v;
+  e.target.value = v;
+  storageSet(LS_NETCACHE, String(v));
+  toast('Network cache: ' + v + ' ms');
+});
+$('webBuffer').addEventListener('change', e => {
+  let v = parseInt(e.target.value, 10);
+  if (!v || v < 5) v = 5;
+  if (v > 90) v = 90;
+  state.webBuffer = v;
+  e.target.value = v;
+  storageSet(LS_WEBUF, String(v));
+  toast('Web player buffer: ' + v + ' s');
+});
+$('relayMode').addEventListener('change', e => {
+  state.relay = e.target.checked;
+  storageSet(LS_RELAY, state.relay ? '1' : '0');
+  toast('FFmpeg relay ' + (state.relay ? 'on' : 'off'));
+});
+$('playerSel').addEventListener('change', e => {
+  setPlayer(e.target.value);
+  toast('Default player: ' + (state.player === 'web' ? 'Web' : 'VLC'));
+});
+document.querySelectorAll('#playerSeg .seg-btn').forEach(b => {
+  b.addEventListener('click', () => {
+    setPlayer(b.dataset.player);
+    toast('Default player: ' + (state.player === 'web' ? 'Web' : 'VLC'));
+  });
+});
+$('autoTranslate').addEventListener('change', e => {
+  state.translate = e.target.checked;
+  storageSet(LS_TRANS, state.translate ? '1' : '0');
+  transGen++;
+  if (state.translate) { if (state.channels.length) render(); else translateVisible(); }
+  toast('Auto-translate ' + (state.translate ? 'on' : 'off'));
+});
+$('retranslate').addEventListener('click', () => {
+  transCache.clear();       // drop cached translations so fresh ones are fetched
+  transGen++;
+  if (state.channels.length) render();   // re-render triggers translation
+  toast('Retranslated');
+});
+$('prefLang').addEventListener('change', e => {
+  state.lang = e.target.value;
+  storageSet(LS_LANG, state.lang);
+  // If the chosen language isn't already in the guide, automatically enable
+  // translation so text actually changes language.
+  const langs = detectLanguages();
+  if (state.lang !== 'en' && !langs.includes(state.lang)) {
+    state.translate = true;
+    storageSet(LS_TRANS, '1');
+    $('autoTranslate').checked = true;
+    toast('Auto-translate enabled for ' + (LANG_NAMES[state.lang] || state.lang.toUpperCase()));
+  }
+  transGen++;
+  if (state.channels.length) render();
+  toast('Preferred language: ' + (LANG_NAMES[state.lang] || state.lang.toUpperCase()));
+});
+$('overlay').addEventListener('click', e => { if (e.target === $('overlay')) closeSettings(); });
+$('fmtOpts').addEventListener('change', e => {
+  if (e.target.name !== 'dfmt') return;
+  state.dfmt = e.target.value;
+  saveDfmt();
+  document.querySelectorAll('.fmt-opt input[name="dfmt"]').forEach(r =>
+    r.closest('.fmt-opt').classList.toggle('sel', r.checked));
+  if (state.channels.length) render();
+  refreshOpenDetails();
+  toast('Date format: ' + e.target.value.replace('DMY','D/M/Y').replace('YMD','Y/M/D').replace('MDY','M/D/Y'));
+});
+// Delete the selected source(s)
+$('delSaved').addEventListener('click', () => {
+  const sel = selectedSources();
+  if (!sel.length) { toast('Select a saved source first', true); return; }
+  if (!confirm('Delete ' + sel.length + ' saved source(s)?')) return;
+  const names = new Set(sel.map(s => s.name));
+  writeSources(savedSources().filter(x => !names.has(x.name)));
+  refreshSavedDropdown('');
+  toast('Deleted: ' + sel.map(s => s.name).join(', '));
+});
+// Rename the first selected source
+$('editSaved').addEventListener('click', () => {
+  const s = selectedSources()[0];
+  if (!s) { toast('Select a saved source first', true); return; }
+  const name = prompt('New name for "' + s.name + '":', s.name);
+  if (!name) return;
+  const nn = name.trim();
+  if (!nn) return;
+  if (nn !== s.name && savedSources().some(x => x.name === nn)) {
+    toast('A source with that name already exists', true); return;
+  }
+  const list = savedSources().filter(x => x.name !== s.name);
+  list.push({ name: nn, m3u: s.m3u, xmltv: s.xmltv });
+  writeSources(list);
+  refreshSavedDropdown(nn);
+  toast('Renamed: ' + nn);
+});
+
+/* ---------- loaders ---------- */
+async function loadGuide() {
+  const loadId = ++activeLoadId;
+  const m3u = $('m3u').value.trim();
+  const xmltv = $('xmltv').value.trim();
+  if (!m3u) { toast('Enter an M3U playlist address first', true); return; }
+  setStatus('Parsing playlist + downloading EPG…');
+  showLoading(true);
+  try {
+    let guide = xmltv;
+    const m = await post('/parse/m3u', { src: m3u });
+    if (loadId !== activeLoadId) return;
+    if (!guide && m.headerEpg) { guide = m.headerEpg; $('xmltv').value = guide; }
+    if (!guide) {
+      state.channels = m.channels.map((c, i) => ({ ...c, _src: i, programs: [], epg: null, matchHow: null }));
+      state.groups = m.groupList;
+      render();
+      setStatus(m.channels.length + ' channels loaded (no EPG source auto-found). Click a channel to play.');
+      return;
+    }
+    const match = await post('/match', { m3u, xmltv: guide });
+    if (loadId !== activeLoadId) return;
+    state.channels = match.channels.map((c, i) => ({ ...c, _src: i }));
+    state.groups = match.groups;
+    render();
+    const withEpg = match.channels.filter(c => c.epg).length;
+    setStatus(match.channels.length + ' channels · ' + match.matched + ' with EPG (' +
+      match.stats.id + ' by id, ' + match.stats.name + ' by name). Click any channel to play.');
+  } catch (e) {
+    if (loadId === activeLoadId) {
+      setStatus('Failed: ' + e.message, 'err');
+      toast('Load failed: ' + e.message, true);
+    }
+  } finally { if (loadId === activeLoadId) showLoading(false); }
+}
+
+async function sample() {
+  $('m3u').value = 'https://iptv-org.github.io/iptv/index.m3u';
+  $('xmltv').value = '';
+  await loadGuide();
+}
+
+// Auto-grab: ask the server to find matching EPG guides for the current playlist.
+async function autoGrab() {
+  const loadId = ++activeLoadId;
+  const m3u = $('m3u').value.trim();
+  if (!m3u) { toast('Enter an M3U playlist first', true); return; }
+  setStatus('Auto-grabbing EPG guides… (this may take a few seconds)');
+  showLoading(true);
+  try {
+    const j = await post('/grab', { m3u });
+    if (loadId !== activeLoadId) return;
+    state.channels = j.channels.map((c, i) => ({ ...c, _src: i }));
+    state.groups = j.groups;
+    // The server wrote the matched guide to a local XMLTV file. If a saved
+    // source is selected, store that file as its data; otherwise just fill the
+    // input (no list changes).
+    if (j.savedFile) {
+      $('xmltv').value = j.savedFile;
+      const sel = selectedSources();
+      if (sel.length) {
+        const list = savedSources();
+        const names = new Set(sel.map(s => s.name));
+        list.forEach(s => { if (names.has(s.name)) s.xmltv = j.savedFile; });
+        writeSources(list);
+        refreshSavedDropdown(sel[0].name);
+      }
+    }
+    $('xmltv').value = $('xmltv').value || '';
+    render();
+    const msg = j.matched + ' of ' + j.total + ' channels matched (' +
+      j.stats.id + ' by id, ' + j.stats.name + ' by name, ' + (j.stats.fuzzy || 0) + ' fuzzy) from ' +
+      (j.covered || 0) + ' guide(s)';
+    const saved = j.savedFile ? ' · saved to selected source' : '';
+    setStatus(j.failures && j.failures.length ? msg + ' · errors: ' + j.failures.join('; ') + saved : msg + saved);
+    toast('Auto EPG: ' + msg + saved);
+  } catch (e) {
+    if (loadId === activeLoadId) {
+      setStatus('Auto-grab failed: ' + e.message, 'err');
+      toast('Auto-grab failed: ' + e.message, true);
+    }
+  } finally {
+    if (loadId === activeLoadId) showLoading(false);
+  }
+}
+
+/* ---------- rendering ---------- */
+function showLoading(on) {
+  let el = document.querySelector('.loading');
+  if (on) {
+    if (el) return;
+    el = document.createElement('div'); el.className = 'loading';
+    el.innerHTML = '<div style="display:flex;gap:10px;align-items:center"><div class="spin"></div> Loading…</div>';
+    stage.appendChild(el);
+  } else if (el) el.remove();
+}
+
+function buildRuler(halfHours, pxPerHour, now, width, chW) {
+  let html = `<div class="ruler" style="width:${width}px">`;
+  for (let h = -halfHours; h <= halfHours; h++) {
+    const t = new Date(now + h * 3600e3);
+    const left = chW + (h + halfHours) * pxPerHour;
+    const label = fmtTime(t.getTime());
+    html += `<div class="tick" style="left:${left}px">${label}</div>`;
+  }
+  return html + '</div>';
+}
+function favKey(ch) { return ch.tvg_id || ch.name; }
+
+function render() {
+  const now = Date.now();
+  const halfHours = parseInt($('window').value, 10);
+  // The sticky channel column occupies the left 240px; the timeline starts to
+  // its right so programs never render underneath (and are hidden by) it.
+  const CH_W = document.body.classList.contains('tv') ? 300 : 240;
+  const minPxPerHour = 240;
+  const availTimeline = Math.max(0, stage.clientWidth - CH_W);
+  const pxPerHour = Math.max(minPxPerHour, availTimeline / (halfHours * 2));
+  const totalW = CH_W + halfHours * 2 * pxPerHour;
+  const start = now - halfHours * 3600e3;
+  const end = now + halfHours * 3600e3;
+
+  const selGroup = $('group').value;
+  const filterMode = $('filter').value;
+  const q = $('q').value.trim().toLowerCase();
+  let channels = state.channels;
+  if (selGroup) channels = channels.filter(c => c.group === selGroup);
+  if (filterMode === 'fav') channels = channels.filter(c => state.fav.has(favKey(c)));
+  if (filterMode === 'epg') channels = channels.filter(c => c.epg);
+  if (q) {
+    channels = channels.filter(c => String(c.name || '').toLowerCase().includes(q) ||
+      (c.programs || []).some(p => String(p.title || '').toLowerCase().includes(q)));
+  }
+
+  const grp = $('group');
+  grp.innerHTML = '<option value="">All channels</option>' +
+    state.groups.map(g => `<option ${g===selGroup?'selected':''}>${escapeHtml(g)}</option>`).join('');
+
+  state.view = channels;
+  if (state.sel != null && state.sel >= channels.length) state.sel = channels.length ? channels.length - 1 : null;
+  if (!channels.length) {
+    stage.innerHTML = '<div class="placeholder"><div class="big">📺</div><div>' +
+      (state.channels.length ? 'No channels match the current filters.' : 'No guide loaded yet.') +
+      '</div><div>Load a playlist or adjust your filters.</div></div>';
+    return;
+  }
+
+  let html = buildRuler(halfHours, pxPerHour, now, totalW, CH_W);
+  html += '<div class="grid" style="width:' + totalW + 'px">';
+
+  channels.forEach((ch, idx) => {
+    const isFav = state.fav.has(favKey(ch));
+    const np = nowProgram(ch, now);
+    const isPlaying = state.current && state.current.url === ch.url;
+    const isSel = idx === state.sel;
+
+    html += '<div class="row' + (isPlaying ? ' playing' : '') + (isSel ? ' selected' : '') + '" id="row-' + idx + '" data-src="' + (ch._src != null ? ch._src : idx) + '">';
+    html += '<div class="ch">';
+    if (ch.logo && /^https?:\/\//i.test(ch.logo)) html += `<img src="${escapeHtml(ch.logo)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.hidden=true">`;
+    html += '<div class="cinfo">';
+    html += '<div class="name">' + escapeHtml(ch.name) + '</div>';
+    if (np) html += `<div class="nowprog"><span class="t">${fmtTime(np.start)}–${fmtTime(np.stop)}</span> <span class="np-title">${escapeHtml(np.title)}</span></div>`;
+    else if (ch.epg) html += '<div class="nowprog" style="color:var(--muted)">no program at this time</div>';
+    else html += '<div class="nowprog" style="color:var(--muted)">no EPG info</div>';
+    if (ch.group) html += `<div class="group">${escapeHtml(ch.group)}</div>`;
+    html += '</div>';
+    html += `<button class="star ${isFav?'on':''}" data-idx="${idx}" title="${isFav?'Remove favorite':'Add favorite'}" aria-label="${isFav?'Remove':'Add'} ${escapeHtml(ch.name)} ${isFav?'from':'to'} favorites" aria-pressed="${isFav}">★</button>`;
+    html += '</div>'; // ch
+
+    const progs = (ch.programs || []).filter(p => p.stop > start && p.start < end);
+    if (progs.length === 0) {
+      const CH_W = 240; // sticky channel column width; start fallback to its right
+      html += `<div class="prog noinfo" style="left:${CH_W}px;width:${totalW - CH_W}px">${ch.epg ? 'No program in this window' : 'No EPG data — click the channel to play anyway'}</div>`;
+    }
+    for (const p of progs) {
+      const left = CH_W + Math.max(0, (p.start - start) / 3600e3) * pxPerHour;
+      const right = CH_W + Math.min(halfHours * 2, (p.stop - start) / 3600e3) * pxPerHour;
+      const w = right - left;
+      if (w < 6) continue;
+      const isNow = p.start <= now && p.stop > now;
+      const tl = `${fmtTime(p.start)}–${fmtTime(p.stop)}`;
+      const pt = progTitle(p), pd = progDesc(p);
+      html += `<div class="prog ${isNow?'now':''}" style="left:${left}px;width:${w}px" ` +
+        `data-idx="${idx}" data-tt="${escapeHtml(pt)}" data-desc="${escapeHtml(pd)}" data-cat="${escapeHtml(p.cat||'')}" data-icon="${escapeHtml(p.icon||'')}" data-start="${p.start}" data-stop="${p.stop}">` +
+        `<div class="t">${tl}</div>` +
+        `<div class="tt">${escapeHtml(pt)}</div>` +
+        (p.cat ? `<div class="d">${escapeHtml(p.cat)}</div>` : '') +
+        '</div>';
+    }
+    html += '</div>'; // row
+  });
+
+  // now-line must live inside the grid so it spans the full content height
+  const nowLeft = CH_W + halfHours * pxPerHour;
+  html += `<div class="nowline" style="left:${nowLeft}px"></div>`;
+  html += '</div>'; // grid
+
+  stage.innerHTML = html;
+  stage.scrollLeft = Math.max(0, nowLeft - stage.clientWidth / 2);
+  translateAfterRender();
+
+  // click channel row -> show channel details (unless clicking star)
+  stage.querySelectorAll('.row').forEach((row) => {
+    row.addEventListener('click', (e) => {
+      if (e.target.closest('.star')) return;
+      const idx = parseInt(row.id.split('-')[1], 10);
+      const ch = channels[idx];
+      if (!ch) return;
+      selectAt(idx);
+      showChannelDetails(ch);
+    });
+  });
+
+  // click program -> details panel
+  stage.querySelectorAll('.prog:not(.noinfo)').forEach(el => {
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const idx = parseInt(el.dataset.idx, 10);
+      const ch = channels[idx];
+      const full = (ch.programs || []).find(p => p.start === parseInt(el.dataset.start,10) && p.stop === parseInt(el.dataset.stop,10));
+      showDetails(ch, full || {
+        title: el.dataset.tt, desc: el.dataset.desc, cat: el.dataset.cat,
+        icon: el.dataset.icon || '', start: parseInt(el.dataset.start,10), stop: parseInt(el.dataset.stop,10)
+      });
+    });
+    // double-click plays the program's channel (default player)
+    el.addEventListener('dblclick', (e) => {
+      e.stopPropagation();
+      const ch = channels[parseInt(el.dataset.idx, 10)];
+      if (ch) playFor(ch);
+    });
+  });
+
+  stage.querySelectorAll('.star').forEach(el => {
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const ch = channels[parseInt(el.dataset.idx,10)];
+      if (!ch) return;
+      const k = favKey(ch);
+      if (state.fav.has(k)) state.fav.delete(k); else state.fav.add(k);
+      saveFav(); render();
+      toast(state.fav.has(k) ? '★ Added to favorites' : 'Removed from favorites');
+    });
+  });
+
+  clearInterval(timer);
+  const renderedAt = now;
+  timer = setInterval(() => {
+    const nl = stage.querySelector('.nowline');
+    if (nl) nl.style.left = (CH_W + (halfHours + (Date.now() - renderedAt) / 3600000) * pxPerHour) + 'px';
+    if (state.current) {
+      const current = state.channels.find(c => c.url === state.current.url);
+      if (current) updateNowBar(current);
+    }
+  }, 30000);
+}
+
+/* ---------- play + details ---------- */
+let hlsPlayer = null;
+// Play through the player selected in Settings (VLC or Web).
+function playFor(ch) {
+  state._cur = ch || state._cur;
+  if (state.player === 'web') playWeb(ch);
+  else playChannel(ch);
+}
+// Keep the drawer's two buttons labelled by the current choice.
+function refreshPlayerButtons() {
+  const primary = state.player === 'web' ? 'Web' : 'VLC';
+  const other = state.player === 'web' ? 'VLC' : 'Web';
+  const dPlay = $('dPlay'), dWeb = $('dWeb');
+  if (dPlay) dPlay.textContent = '▶ Play (' + primary + ')';
+  if (dWeb) { dWeb.textContent = '🌐 ' + other; dWeb.title = 'Open in ' + other; }
+}
+// Sync the toolbar segmented control to state.player.
+function updatePlayerSeg() {
+  document.querySelectorAll('#playerSeg .seg-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.player === state.player);
+  });
+}
+// Set the default player (from toolbar or Settings) and keep all UI in sync.
+function setPlayer(p) {
+  state.player = p === 'web' ? 'web' : 'vlc';
+  storageSet(LS_PLAYER, state.player);
+  updatePlayerSeg();
+  refreshPlayerButtons();
+  const sel = $('playerSel'); if (sel) sel.value = state.player;
+}
+
+// Speed test: latency (ping RTT), download (8MB), upload (4MB).
+async function runSpeedTest() {
+  const out = $('speedResult');
+  out.textContent = 'Testing…';
+  try {
+    // latency: best of 5 round-trips
+    let lat = Infinity;
+    for (let i = 0; i < 5; i++) {
+      const s = performance.now();
+      await fetch('/ping', { cache: 'no-store' });
+      const rtt = performance.now() - s;
+      if (rtt < lat) lat = rtt;
+    }
+    // download
+    const tD0 = performance.now();
+    const resp = await fetch('/speedtest', { cache: 'no-store' });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const buf = await resp.arrayBuffer();
+    const dSec = (performance.now() - tD0) / 1000;
+    const down = (buf.byteLength / (1024 * 1024)) / dSec * 8;
+    // upload
+    const uBytes = 4 * 1024 * 1024;
+    const tU0 = performance.now();
+    const ur = await fetch('/uploadtest', { method: 'POST', body: new Uint8Array(uBytes) });
+    if (!ur.ok) throw new Error('upload HTTP ' + ur.status);
+    await ur.json();
+    const uSec = (performance.now() - tU0) / 1000;
+    const up = (uBytes / (1024 * 1024)) / uSec * 8;
+    window._lastMbps = down;
+    dbgLog('speedtest', { down, up, lat });
+    // auto-apply a sensible web-player buffer tier for the measured download
+    const recBuffer = down >= 8 ? 30 : down >= 5 ? 24 : down >= 3.2 ? 18 : down >= 1.8 ? 12 : 8;
+    let applied = '';
+    if (recBuffer !== state.webBuffer) {
+      state.webBuffer = recBuffer;
+      storageSet(LS_WEBUF, String(recBuffer));
+      const wb = $('webBuffer'); if (wb) wb.value = recBuffer;
+      applied = ` · <span style="color:var(--accent)">auto-set buffer → ${recBuffer}s</span>`;
+    } else {
+      applied = ` · <span style="color:var(--accent)">buffer stays ${state.webBuffer}s</span>`;
+    }
+    const f = m => m >= 10 ? m.toFixed(0) : m.toFixed(1);
+    out.innerHTML = `<span style="color:var(--text)"><b>${f(down)}</b> Mbps ↓ download</span> · <b>${f(up)}</b> Mbps ↑ upload · <b>${lat.toFixed(0)}</b> ms latency${applied}`;
+    toast('Speed test done — buffer set to ' + state.webBuffer + 's');
+  } catch (e) {
+    out.textContent = 'Speed test failed: ' + e.message;
+  }
+}
+function playChannel(ch) {
+  if (!ch || !ch.url) { toast('No stream URL for this channel', true); return; }
+  state.current = { url: ch.url, name: ch.name };
+  render();
+  Promise.resolve(post('/play', { url: ch.url, name: ch.name, fullscreen: state.fullscreen, networkCaching: state.netCache, relay: state.relay, hw: state.hw }))
+    .then(() => {
+      updateNowBar(ch);
+      toast('▶ ' + ch.name);
+    })
+    .catch(e => {
+      state.current = null;
+      render();
+      toast('Play failed: ' + e.message, true);
+    });
+}
+
+// Web player: plays a relayed stream in a <video>. Prefers the native
+// fragmented-MP4 relay (no blob/MSE, so it works even where CSP blocks
+// blob: media); falls back to the HLS relay via hls.js when available.
+let _playSeq = 0;
+async function playWeb(ch) {
+  if (!ch || !ch.url) { toast('No stream URL for this channel', true); return; }
+  const seq = ++_playSeq;
+  const latest = () => seq === _playSeq;
+  const $p = $('webplayer'), vid = $('wpVideo');
+  $('wpTitle').textContent = ch.name;
+  state._cur = ch;
+  post('/stop', {}).catch(() => {});   // free any previous relay (MP4/HLS/VLC)
+  $p.style.display = 'flex';
+  if (state.fullscreen) applyWebFs(true);
+  showLoader(true);
+  showPlayerErr('');
+  dbgLog('web_open', { ch: ch.name });
+  state._qf = 0;   // fresh channel -> clear ad-loop backoff counter
+  if (!vid._volBound) { vid._volBound = true; vid.addEventListener('volumechange', () => dbgLog('volume', { v: vid.volume, muted: vid.muted })); }
+  if (hlsPlayer) { try { hlsPlayer.destroy(); } catch (_) {} hlsPlayer = null; }
+  vid.pause(); vid.removeAttribute('src'); vid.load();
+  vid._reconnects = 0;
+  vid._triedTc = false;
+  vid._eofRestarts = 0;
+  let mp4Err = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try { await startMp4(ch); mp4Err = null; if (!latest()) return; break; }
+    catch (e) { mp4Err = e; dbgLog('mp4_failed', { msg: e.message, attempt }); if (attempt === 0) await new Promise(r => setTimeout(r, 2000)); }
+  }
+  if (mp4Err) {
+    dbgLog('hls_fallback', {});
+    try { await startHlsPlay(ch); }
+    catch (e2) { if (!latest()) return; dbgLog('web_failed', { msg: e2.message }); setChErr(ch, e2.message); showPlayerErr('⚠ ' + ch.name + ' failed — ' + e2.message); toast('Channel failed: ' + e2.message, true); }
+  }
+}
+function showLoader(on) {
+  const l = $('wpLoading'); if (l) l.style.display = on ? 'flex' : 'none';
+  const v = $('wpVideo'); if (v) v.controls = !on;  // hide native spinner so only ours shows
+}
+function showPlayerErr(msg) {
+  showLoader(false);
+  const el = $('wpError');
+  if (el) { el.textContent = msg || ''; el.style.display = msg ? 'flex' : 'none'; }
+}
+function applyWebFs(on) {
+  const el = $('webplayer');
+  try {
+    if (on) { if (!document.fullscreenElement && el.requestFullscreen) el.requestFullscreen(); }
+    else if (document.fullscreenElement) document.exitFullscreen();
+  } catch (_) {}
+}
+
+// ---- Debug mode: record player/server events for diagnosis ----
+const dbg = { events: [] };
+function dbgLog(k, o) {
+  if (!state.debug) return;
+  dbg.events.push(Object.assign({ t: Date.now(), k }, o || {}));
+  if (dbg.events.length > 600) dbg.events.shift();
+}
+
+// Start the native MP4 relay and attach the video + auto-reconnect monitor.
+async function startMp4(ch, quiet, tc) {
+  const vid = $('wpVideo');
+  const r4 = await post('/streammp4', { url: ch.url, buffer: state.webBuffer, tc: !!tc, proxy: effectiveProxy() });
+  if (r4.codecs) window._codecs = r4.codecs;
+  clearChErr(ch);
+  dbgLog(tc ? 'mp4_relay_tc' : 'mp4_relay', { codecs: r4.codecs || null, buffer: state.webBuffer, tc: !!tc });
+  vid._checkedEnded = false; vid._stopStall = false;
+  vid.preload = 'auto';
+  vid.src = r4.url;
+  let metaDone = false;
+  clearTimeout(vid._wpWatch);
+  if (!quiet) {
+    vid._wpWatch = setTimeout(() => {
+      if (!metaDone && vid.readyState < 1) toast('Web player is still buffering — try the VLC player if this persists.', true);
+    }, 10000);
+  }
+  vid.onloadedmetadata = () => { metaDone = true; dbgLog('loadedmetadata', { w: vid.videoWidth, h: vid.videoHeight }); vid.play().catch(() => {}); };
+  vid.addEventListener('playing', () => {
+    showLoader(false);
+    dbgLog('playing', { t: vid.currentTime });
+    // On a reconnect (quiet restart), the new relay starts at the current live
+    // point. Skip modestly forward (capped by what's buffered) to get past the
+    // immediate ad/program front — do NOT rewind (buffered.end is near the
+    // start shortly after opening, so seeking to it would replay content).
+    if (quiet && vid.buffered && vid.buffered.length) {
+      try {
+        const be = vid.buffered.end(vid.buffered.length - 1);
+        const skip = Math.min(be - 1, 15);
+        if (skip > 3) { vid.currentTime = skip; dbgLog('reconnect_skip', { to: skip }); }
+      } catch (_) {}
+    }
+  }, { once: true });
+  vid.addEventListener('waiting', () => dbgLog('waiting', { t: vid.currentTime }), { once: false });
+  vid.onerror = () => { dbgLog('videofail', { code: vid.error && vid.error.code });
+    if (vid.error && vid.error.code === 4) {
+      vid.onerror = null;
+      if (!vid._triedTc) {
+        vid._triedTc = true;
+        dbgLog('auto_codec_switch', {});
+        toast('Auto-switching to transcoded video for compatibility…');
+        post('/stop', {}).catch(() => {});
+        startMp4(ch, true, true).catch(() => startHlsPlay(ch).catch(() => {}));
+      } else {
+        startHlsPlay(ch).catch(() => {});
+      }
+    }
+  };
+  vid.play().catch(() => {});
+  state.current = { url: ch.url, name: ch.name };
+  monitorStall(ch, vid);
+}
+
+// Auto-recover from momentary network blips: if playback stalls (time stops
+// advancing) for ~12s, restart the relay and reload. Capped to avoid loops.
+async function checkFeedEnded(ch, vid) {
+  if (vid._checkedEnded) return false;
+  vid._checkedEnded = true;
+  try {
+    const j = await (await fetch('/relayinfo')).json();
+    if (j.ended) { dbgLog('feed_ended', {}); return true; }
+    setTimeout(() => { vid._checkedEnded = false; }, 15000);
+  } catch (_) {}
+  return false;
+}
+function monitorStall(ch, vid) {
+  clearInterval(vid._stall);
+  let last = vid.currentTime, lastAt = Date.now();
+  vid._stall = setInterval(async () => {
+    const now = Date.now();
+    const playing = !vid.paused && vid.readyState >= 2;
+    if (playing) {
+      if (vid.currentTime !== last) {
+        last = vid.currentTime; lastAt = now;
+        if (vid.currentTime > 30) state._qf = 0;   // healthy playback -> clear ad-loop counter
+      }
+      else if (now - lastAt > 12000) {
+        if (vid._reconnects >= 10) { toast('Stream stalled repeatedly — check your connection. Use VLC if it continues.', true); clearInterval(vid._stall); return; }
+        // Is the feed actually over (clean EOF) rather than a blip?
+        const ended = await checkFeedEnded(ch, vid);
+        if (ended) {
+          // Pluto-style feeds arrive in short, bounded segments. If we got real
+          // playback before EOF, auto-restart to keep viewing; otherwise give up.
+          if (state.autoRestart && vid._eofRestarts < 4 && last > 5) {
+            vid._eofRestarts++;
+            dbgLog('eof_restart', { n: vid._eofRestarts });
+            toast('Channel streams in short segments — auto-restarting (' + vid._eofRestarts + ')…');
+            lastAt = now;
+            post('/stop', {}).catch(() => {});
+            startMp4(ch, true).catch(() => {});
+          } else {
+            clearInterval(vid._stall);
+            toast("This channel's feed ends too early — try VLC or another channel.", true);
+          }
+          return;
+        }
+        vid._reconnects++;
+        lastAt = now;
+        // Ad-loop detection: if sessions keep dying quickly (<30s played), back
+        // off so we ride out the ad instead of immediately re-entering it.
+        const shortPlay = vid.currentTime < 30;
+        let qf = (state._qf || 0);
+        if (shortPlay) { qf++; } else { qf = 0; }
+        state._qf = qf;
+        const backoff = Math.min(30000, 3000 * Math.pow(2, qf - 1));  // 3s,6s,12s,24s,30s
+        dbgLog('reconnect', { n: vid._reconnects, at: vid.currentTime, backoff: backoff, qf: qf });
+        if (vid._reconnects === 1) toast('Network blip — reconnecting (buffered playback will cover it)…');
+        else if (qf >= 3) toast('Ad/segment keeps stalling — retrying in ' + Math.round(backoff / 1000) + 's…');
+        post('/stop', {}).catch(() => {});
+        if (backoff > 4000) showLoader(true);
+        setTimeout(() => { showLoader(false); startMp4(ch, true).catch(() => {}); }, backoff);
+      }
+    }
+  }, 2000);
+}
+async function startHlsPlay(ch) {
+  const vid = $('wpVideo');
+  const r = await post('/stream', { url: ch.url, proxy: effectiveProxy() });
+  const src = r.playUrl;
+  if (window.Hls && Hls.isSupported()) {
+    hlsPlayer = new Hls({ maxBufferLength: 30, enableWorker: true });
+    hlsPlayer.loadSource(src);
+    hlsPlayer.attachMedia(vid);
+    hlsPlayer.on(Hls.Events.MANIFEST_PARSED, () => vid.play().catch(() => {}));
+    hlsPlayer.on(Hls.Events.ERROR, (e, data) => {
+      if (!data.fatal) return;
+      if (data.type === Hls.ErrorTypes.NETWORK_ERROR) hlsPlayer.startLoad();
+      else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) hlsPlayer.recoverMediaError();
+      else toast('Stream error: ' + data.details, true);
+    });
+  } else if (vid.canPlayType('application/vnd.apple.mpegurl')) {
+    vid.src = src; vid.play().catch(() => {});
+  } else {
+    throw new Error('no usable HLS path');
+  }
+  state.current = { url: ch.url, name: ch.name };
+}
+function closeWeb() {
+  if (hlsPlayer) { try { hlsPlayer.destroy(); } catch (_) {} hlsPlayer = null; }
+  clearInterval(statsTimer); statsTimer = null;
+  const vid = $('wpVideo'); clearTimeout(vid._wpWatch); clearInterval(vid._stall); vid.pause(); vid.removeAttribute('src'); vid.load(); vid.onerror = null; vid.onloadedmetadata = null;
+  closeChList();
+  const cn = $('wpChno'); if (cn) cn.classList.remove('show');
+  clearTimeout(chnoTimer); clearTimeout(npTimer); npBuf = '';
+  $('ctxMenu').style.display = 'none'; $('statsOverlay').style.display = 'none'; $('dbgOverlay').style.display = 'none'; showLoader(false);
+  $('webplayer').style.display = 'none';
+  applyWebFs(false);
+  post('/stop', {}).catch(() => {});
+}
+/* ---- player channel tools: next/prev, transparent list, number badge, numberpad ---- */
+let chnoTimer = null, npBuf = '', npTimer = null;
+
+function channelNumber(ch) {
+  const i = state.view.indexOf(ch);
+  return i >= 0 ? i + 1 : (state.channels.indexOf(ch) + 1);
+}
+function dbgChanChange(ch, how) {
+  if (!ch) return;
+  dbgLog('channel_change', { ch: ch.name, how, num: channelNumber(ch) });
+}
+// Per-channel last-error tracking (shown in the drawer + channel list).
+function setChErr(ch, msg) {
+  if (!ch || !ch.url) return;
+  if (!state._chErr) state._chErr = new Map();
+  state._chErr.set(ch.url, { msg, t: Date.now() });
+}
+function clearChErr(ch) { if (ch && state._chErr) state._chErr.delete(ch.url); }
+function chErr(ch) { return (state._chErr && state._chErr.get(ch && ch.url)) || null; }
+function showChno(txt) {
+  if (!state.chno) return;
+  const el = $('wpChno'); if (!el) return;
+  el.innerHTML = '<svg width="120" height="72" viewBox="0 0 120 72">' +
+    '<rect x="6" y="6" width="108" height="60" rx="12" fill="rgba(0,0,0,.55)" stroke="rgba(255,255,255,.35)" stroke-width="2"/>' +
+    '<text x="60" y="50" text-anchor="middle" font-family="ui-monospace,Consolas,monospace" font-size="34" font-weight="700" fill="#fff">' +
+    escapeHtml(String(txt)) + '</text></svg>';
+  el.classList.add('show');
+  clearTimeout(chnoTimer);
+  chnoTimer = setTimeout(() => el.classList.remove('show'), 4000);
+}
+function buildChList() {
+  const box = $('wpChList');
+  let cur = -1;
+  if (state._cur) { const i = state.view.indexOf(state._cur); if (i >= 0) cur = i; }
+  else if (state.sel != null) cur = state.sel;
+  box.innerHTML = state.view.map((ch, i) =>
+    `<div class="wcl-item ${i === cur ? 'active' : ''}" data-i="${i}">` +
+    `<span class="wcl-num">${i + 1}</span>` +
+    (i === cur ? '<span class="wcl-play">▶</span>' : '') +
+    (chErr(ch) ? `<span class="wcl-err" title="${escapeHtml(chErr(ch).msg)}">⚠</span>` : '') +
+    `<span class="wcl-name">${escapeHtml(ch.name)}</span></div>`).join('')
+    || '<div style="padding:14px;color:#8a94a8">no channels</div>';
+  return cur;
+}
+function openChList() {
+  const cur = buildChList();
+  $('wpChList').classList.remove('hidden');
+  const items = document.querySelectorAll('#wpChList .wcl-item');
+  const el = items[Math.max(0, cur)]; if (el) el.scrollIntoView({ block: 'nearest' });
+}
+function closeChList() { $('wpChList').classList.add('hidden'); }
+function zapPlayer(delta) {
+  if (!state.view.length) return;
+  const cur = state._cur ? state.view.findIndex(c => c === state._cur) : state.sel;
+  let i = cur >= 0 ? cur : 0;
+  i = Math.min(Math.max(i + delta, 0), state.view.length - 1);
+  selectAt(i);
+  const c = state.view[i];
+  if (c) { playFor(c); showChno(channelNumber(c)); dbgChanChange(c, delta > 0 ? 'next' : 'prev'); }
+}
+function applyNumber() {
+  const n = parseInt(npBuf, 10);
+  npBuf = ''; clearTimeout(npTimer); npTimer = null;
+  if (!n) return;
+  const i = state.view.findIndex((_, k) => k + 1 === n);
+  if (i >= 0) { selectAt(i); playFor(state.view[i]); showChno(n); dbgChanChange(state.view[i], 'number'); }
+  else toast('No channel ' + n, true);
+}
+function handlePlayerKey(e) {
+  const k = e.key;
+  const box = $('wpChList');
+  const listOpen = box && !box.classList.contains('hidden');
+  if (k === 'Escape') {
+    if (listOpen) { closeChList(); }
+    else closeWeb();
+    e.preventDefault(); return;
+  }
+  if (k >= '0' && k <= '9') {
+    if (npBuf.length < 4) npBuf += k;
+    showChno('→ ' + npBuf);
+    clearTimeout(npTimer);
+    npTimer = setTimeout(applyNumber, 3000);
+    e.preventDefault(); return;
+  }
+  if (k === 'Enter') {
+    if (npBuf) { e.preventDefault(); applyNumber(); return; }
+    if (listOpen) {
+      const items = [...box.querySelectorAll('.wcl-item')];
+      const a = items.findIndex(x => x.classList.contains('active'));
+      if (items[a]) { const c = state.view[+items[a].dataset.i]; if (c) { closeChList(); playFor(c); dbgChanChange(c, 'list'); } }
+      e.preventDefault();
+    }
+    return;
+  }
+  if (listOpen) {
+    const items = [...box.querySelectorAll('.wcl-item')];
+    let a = items.findIndex(x => x.classList.contains('active'));
+    if (a < 0) a = 0;
+    if (k === 'ArrowDown') a = Math.min(a + 1, items.length - 1);
+    else if (k === 'ArrowUp') a = Math.max(a - 1, 0);
+    else return;
+    items.forEach((x, i) => x.classList.toggle('active', i === a));
+    if (items[a]) items[a].scrollIntoView({ block: 'nearest' });
+    e.preventDefault(); return;
+  }
+  if (k === 'ArrowDown') { e.preventDefault(); zapPlayer(1); }
+  else if (k === 'ArrowUp') { e.preventDefault(); zapPlayer(-1); }
+  else if (k === 'ArrowRight') { e.preventDefault(); try { $('wpVideo').currentTime += 15; } catch (_) {} }
+  else if (k === 'ArrowLeft') { e.preventDefault(); try { $('wpVideo').currentTime -= 15; } catch (_) {} }
+}
+$('wpPrev').addEventListener('click', () => zapPlayer(-1));
+$('wpNext').addEventListener('click', () => zapPlayer(1));
+$('wpListBtn').addEventListener('click', () => {
+  const box = $('wpChList');
+  if (box.classList.contains('hidden')) openChList(); else closeChList();
+});
+$('wpChList').addEventListener('mousedown', (e) => {
+  const it = e.target.closest('.wcl-item'); if (!it) return;
+  closeChList();
+  const c = state.view[+it.dataset.i]; if (c) { playFor(c); dbgChanChange(c, 'list'); }
+});
+$('wpClose').addEventListener('click', closeWeb);
+
+/* ---- right-click menu + 'Stats for nerds' ---- */
+function showCtx(x, y, hasStats) {
+  const menu = $('ctxMenu');
+  const q = state.quality;
+  menu.innerHTML =
+    (state.debug ? `<div class="ctx-item" data-act="dbg"><span>🐞 Debug records (export)</span><span class="chk"></span></div><div class="ctx-sep"></div>` : '') +
+    `<div class="ctx-item" data-act="stats"><span>Stats for nerds</span><span class="chk">${hasStats ? '✓' : ''}</span></div>` +
+    `<div class="ctx-sep"></div>` +
+    `<div class="ctx-item" data-act="q-auto"><span>Quality</span><span class="chk">${q==='auto'?'Auto':''}</span></div>` +
+    `<div class="ctx-item" data-act="q-high"><span>&nbsp;&nbsp;High (1080p)</span><span class="chk">${q==='high'?'✓':''}</span></div>` +
+    `<div class="ctx-item" data-act="q-med"><span>&nbsp;&nbsp;Medium (720p)</span><span class="chk">${q==='med'?'✓':''}</span></div>` +
+    `<div class="ctx-item" data-act="q-low"><span>&nbsp;&nbsp;Low (480p)</span><span class="chk">${q==='low'?'✓':''}</span></div>`;
+  const wp = $('webplayer').getBoundingClientRect();
+  menu.style.left = Math.min(x - wp.left, wp.width - 200) + 'px';
+  menu.style.top = Math.min(y - wp.top, wp.height - 180) + 'px';
+  menu.style.display = 'block';
+  document.querySelectorAll('#ctxMenu .ctx-item').forEach(it => {
+    it.addEventListener('click', () => {
+      const act = it.dataset.act;
+      if (act === 'stats') toggleStats();
+      else if (act === 'dbg') openDbg();
+      else if (act.startsWith('q-')) {
+        state.quality = act.slice(2);
+        toast('Stream quality preference: ' + state.quality + ' (auto/priority; VLC uses adaptive HLS)');
+      }
+      menu.style.display = 'none';
+    });
+  });
+}
+// Clicking anywhere outside the context menu closes it; that first click is
+// swallowed so it doesn't also toggle play/pause. Subsequent clicks behave normally.
+$('webplayer').addEventListener('click', e => {
+  const menu = $('ctxMenu');
+  if (!menu || menu.style.display === 'none') return;
+  if (!menu.contains(e.target)) {
+    e.preventDefault();
+    e.stopPropagation();
+    menu.style.display = 'none';
+  }
+}, true);
+let statsTimer = null;
+let frameCount = 0;
+function toggleStats() {
+  const ov = $('statsOverlay');
+  const on = ov.style.display !== 'block';
+  ov.style.display = on ? 'block' : 'none';
+  if (on) {
+    ensureCodecs();
+    clearInterval(statsTimer);
+    statsTimer = setInterval(updateStats, 500);
+    updateStats();
+  } else {
+    clearInterval(statsTimer); statsTimer = null;
+  }
+}
+async function fetchRelayInfo() {
+  try {
+    const j = await (await fetch('/relayinfo')).json();
+    if (j.codecs && (j.codecs.video || j.codecs.audio)) window._codecs = j.codecs;
+    window._liveMbps = j.connectionMbps || 0;
+  } catch (_) {}
+}
+function ensureCodecs() {
+  if (!window._codecs || !(window._codecs.video || window._codecs.audio)) fetchRelayInfo();
+}
+function updateStats() {
+  const v = $('wpVideo');
+  const ov = $('statsOverlay');
+  if (!v || ov.style.display !== 'block') { clearInterval(statsTimer); return; }
+  // keep the live connection rate fresh while the panel is open
+  if (!window._lastRelayFetch || Date.now() - window._lastRelayFetch > 2500) {
+    window._lastRelayFetch = Date.now();
+    fetchRelayInfo();
+  }
+  if (window._lastBufEnd === undefined) window._lastBufEnd = 0;
+  let ahead = 0, bufEnd = 0;
+  if (v.buffered && v.buffered.length) { bufEnd = v.buffered.end(v.buffered.length - 1); ahead = Math.max(0, bufEnd - v.currentTime); }
+  window._bufHist = window._bufHist || [];
+  window._bufHist.push(ahead);
+  if (window._bufHist.length > 40) window._bufHist.shift();
+  const maxA = Math.max(30, ...window._bufHist);
+  const n = window._bufHist.length;
+  const pts = window._bufHist.map((a, i) => `${n > 1 ? i / (n - 1) * 120 : 0},${26 - (a / maxA) * 22}`).join(' ');
+  const graph = `<svg width="120" height="28" viewBox="0 0 120 28" style="display:block;background:rgba(255,255,255,.04)"><polyline points="${pts}" fill="none" stroke="#4c8bf5" stroke-width="1.5"/><line x1="0" y1="24" x2="120" y2="24" stroke="rgba(255,255,255,.15)"/></svg>`;
+  const activity = bufEnd > window._lastBufEnd + 0.01 ? 'receiving'
+    : (ahead > 4 ? 'buffer full' : 'stalled');
+  window._lastBufEnd = bufEnd;
+
+  const health = ahead >= 20 ? 'Good' : ahead >= 10 ? 'Medium' : ahead >= 3 ? 'Low' : 'Critical';
+  const healthPct = Math.min(100, Math.round(ahead / 30 * 100));
+
+  let dropped = 'n/a';
+  try { const q = v.getVideoPlaybackQuality && v.getVideoPlaybackQuality(); dropped = (q && q.droppedFrames != null) ? q.droppedFrames : 'n/a'; } catch (_) {}
+  if (v.requestVideoFrameCallback) { try { v.requestVideoFrameCallback(() => { frameCount++; }); } catch (_) {} }
+  const res = (v.videoWidth || '?') + '×' + (v.videoHeight || '?');
+  const cc = window._codecs || {};
+  const cRes = cc.res || (window._lastMbps ? (window._lastMbps >= 8 ? '1920×1080' : window._lastMbps >= 3.2 ? '1280×720' : '854×480') : 'auto');
+  const codecLine = (cc.video || '—') + ' / ' + (cc.audio || '—') + (cc.res ? ' @ ' + cc.res : '');
+  const speed = window._liveMbps ? window._liveMbps.toFixed(1) + ' Mbps (live)'
+    : (window._lastMbps ? window._lastMbps.toFixed(1) + ' Mbps (measured)' : '— (run speed test)');
+  const cs = (v.colorSpace && v.colorSpace.primaries) ? v.colorSpace.primaries : '—';
+
+  ov.innerHTML =
+    `<b>Stats for nerds</b><br>` +
+    `Viewport / Frames: ${window.innerWidth}×${window.innerHeight} / ${frameCount} (dropped ${dropped})<br>` +
+    `Current / Optimal Res: ${res} / ${cRes}<br>` +
+    `Volume / Normalized: ${Math.round((v.volume||0)*100)}% / ${v.muted ? 'muted' : 'on'}<br>` +
+    `Codecs: ${codecLine}<br>` +
+    `Color: ${cs}<br>` +
+    `Connection Speed: ${speed}<br>` +
+    `Network Activity: ${activity}` + graph + `<br>` +
+    `Buffer Health: ${health} (${healthPct}% · ${ahead.toFixed(1)}s ahead)<br>` +
+    `Date: ${new Date().toLocaleString()}<br>` +
+    `<button class="stats-copy" data-copy="1">⧉ Copy stats</button>`;
+}
+function copyStats() {
+  const t = $('statsOverlay').innerText;
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(t).then(() => toast('Stats copied to clipboard')).catch(() => copyStatsFallback(t));
+  } else copyStatsFallback(t);
+}
+function copyStatsFallback(t) {
+  const ta = document.createElement('textarea');
+  ta.value = t; document.body.appendChild(ta); ta.select();
+  try { document.execCommand('copy'); toast('Stats copied to clipboard'); } catch (_) { toast('Copy failed', true); }
+  document.body.removeChild(ta);
+}
+$('statsOverlay').addEventListener('click', e => { if (e.target.closest('[data-copy]')) copyStats(); });
+
+// ---- Debug records overlay (open/export) ----
+async function openDbg() {
+  const ov = $('dbgOverlay');
+  let srv = [];
+  try { const j = await (await fetch('/debuglog')).json(); srv = j.events || []; } catch (_) {}
+  // flag events that indicate a problem
+  const isErr = e => {
+    const k = String(e.k || e.msg || '');
+    if (/^(ffmpeg_exit_err|watchdog_stall|watchdog_restart_failed|relay_timeout|http_error|mp4_failed|web_failed|videofail|feed_ended)$/i.test(k)) return true;
+    if (e.code != null && Number(e.code) !== 0) return true;
+    return /\b(404|403|429|500|502|503|timeout|timed out|corrupt|exit err)\b/i.test(String(e.msg || e.tail || ''));
+  };
+  const mk = (e, tag) => {
+    const lbl = e.k || e.msg || '?';
+    const rest = (e.codecs ? ' codecs=' + JSON.stringify(e.codecs) : '') +
+      (e.msg && e.k ? ' msg=' + String(e.msg).slice(0, 160) : '') +
+      (e.code != null ? ' code=' + e.code : '') +
+      (e.ch ? ' ch=' + e.ch : '') +
+      (e.how ? ' how=' + e.how : '') +
+      (e.num ? ' num=' + e.num : '') +
+      (e.tail ? ' tail=' + String(e.tail).replace(/\s+/g, ' ').slice(-240) : '');
+    return { t: (tag ? '[srv] ' : '') + new Date(e.t).toLocaleTimeString() + ' ' + lbl + rest, err: isErr(e) };
+  };
+  let rows = [...dbg.events.map(e => mk(e, '')), ...srv.map(e => mk(e, 'srv'))].slice(-150);
+  const onlyErr = ov.dataset.onlyErr === '1';
+  const errCount = rows.filter(r => r.err).length;
+  if (onlyErr) rows = rows.filter(r => r.err);
+  const htmlRows = rows.map(r =>
+    `<div class="dbg-line ${r.err ? 'dbg-err' : ''}">${escapeHtml(r.t)}</div>`).join('');
+  ov.innerHTML =
+    '<div style="font-weight:700;margin-bottom:6px">🐞 Debug records (' + dbg.events.length + ' client · ' + srv.length + ' server · ' + errCount + ' flagged)</div>' +
+    '<label class="fmt-opt" style="display:inline-flex;gap:6px;font-size:12px;margin:0 0 6px">' +
+      '<input type="checkbox" id="dbgOnlyErr"> Show errors only</label>' +
+    '<div id="dbgLines" style="max-height:300px;overflow:auto;font:10px/1.4 ui-monospace,Consolas,monospace;margin:0 0 8px">' + htmlRows + '</div>' +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
+      '<button class="stats-copy" id="dbgExport">⬇ Export JSON</button>' +
+      '<button class="stats-copy" id="dbgCopy">⧉ Copy</button>' +
+      '<button class="stats-copy" id="dbgClear">🧹 Clear (fresh)</button>' +
+      '<button class="stats-copy" id="dbgClose">Close</button>' +
+    '</div>';
+  ov.style.display = 'block';
+  ov.dataset.onlyErr = '0';
+  $('dbgOnlyErr').checked = false;
+  $('dbgOnlyErr').onchange = () => { ov.dataset.onlyErr = $('dbgOnlyErr').checked ? '1' : '0'; openDbg(); };
+  $('dbgExport').onclick = () => exportDbg(srv);
+  $('dbgCopy').onclick = () => {
+    const payload = { app: 'vlc-epg', exportedAt: new Date().toISOString(),
+      state: { quality: state.quality, relay: state.relay, buffer: state.webBuffer, hw: state.hw },
+      clientEvents: dbg.events, serverEvents: srv };
+    try { navigator.clipboard.writeText(JSON.stringify(payload, null, 2)); toast('Debug records copied'); }
+    catch (_) { exportDbg(srv); }
+  };
+  $('dbgClear').onclick = async () => {
+    dbg.events = [];
+    try { await fetch('/debugreset', { method: 'POST', body: '{}', headers: { 'Content-Type': 'application/json' } }); } catch (_) {}
+    toast('Fresh debug session');
+    openDbg();
+  };
+  $('dbgClose').onclick = () => { ov.style.display = 'none'; };
+}
+function exportDbg(srv) {
+  const payload = {
+    app: 'vlc-epg', exportedAt: new Date().toISOString(),
+    state: { quality: state.quality, relay: state.relay, buffer: state.webBuffer, hw: state.hw },
+    player: { codecs: window._codecs || null, liveMbps: window._liveMbps || 0 },
+    clientEvents: dbg.events, serverEvents: srv
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'epg-debug.json'; document.body.appendChild(a); a.click(); a.remove();
+  toast('Debug log exported (epg-debug.json)');
+}
+document.getElementById('wpVideo').addEventListener('contextmenu', e => {
+  e.preventDefault();
+  const hasStats = $('statsOverlay').style.display === 'block';
+  showCtx(e.clientX, e.clientY, hasStats);
+});
+document.addEventListener('click', e => {
+  if (!e.target.closest('.ctx-menu')) $('ctxMenu').style.display = 'none';
+});
+
+function updateNowBar(ch) {
+  const bar = $('nowbar');
+  bar.style.display = 'flex';
+  $('nbCh').textContent = ch.name;
+  const np = nowProgram(ch, Date.now());
+  $('nbProg').textContent = np ? ('Now: ' + np.title) : '▶ playing';
+  $('nbTime').textContent = np ? (fmtTime(np.start) + '–' + fmtTime(np.stop)) : '';
+}
+
+function openDetails() {
+  $('details').classList.add('open');
+  $('details').setAttribute('aria-hidden', 'false');
+  // Reserve room below the grid (plus a small buffer) so the last rows can
+  // scroll fully clear of the drawer.
+  const g = stage.querySelector('.grid');
+  if (g) g.style.marginBottom = ($('details').offsetHeight + 40) + 'px';
+}
+// Re-fill the drawer if it's open (used when date/time format changes).
+function refreshOpenDetails() {
+  if ($('details').classList.contains('open') && state._drw) {
+    showDetails(state._drw.ch, state._drw.p);
+  }
+}
+function closeDetails() {
+  $('details').classList.remove('open');
+  $('details').setAttribute('aria-hidden', 'true');
+  const g = stage.querySelector('.grid');
+  if (g) g.style.marginBottom = '';
+}
+
+// Parse xmltv_ns episode-num ("S.E" or "S.E/P") into {season, episode}.
+function parseEpisode(program) {
+  if (!program || !Array.isArray(program.episodeNums)) return null;
+  const ns = program.episodeNums.find(e => e.system === 'xmltv_ns');
+  if (ns) {
+    const m = ns.num.trim().match(/^\s*(\d+)\.(\d+)/);
+    if (m) return { season: +m[1], episode: +m[2] };
+  }
+  const on = program.episodeNums.find(e => e.system === 'onscreen');
+  if (on && /^\d+$/.test(on.num.trim())) return { season: null, episode: +on.num.trim() };
+  return null;
+}
+
+// Build the metadata rows for the drawer (only fields that are present).
+function renderMeta(program, channel) {
+  const rows = [];
+  const push = (k, v) => { if (v != null && String(v).trim() !== '' && String(v).trim() !== '0') rows.push([k, String(v)]); };
+  if (program) {
+    const ep = parseEpisode(program);
+    if (program.sub) push('Episode', program.sub);
+    if (ep && ep.season != null) push('Season', ep.season);
+    if (ep && ep.episode != null) push('Episode №', ep.episode);
+    if (program.year) push('Year', fmtYear(program.year));
+    if (program.start) push('Date', fmtDate(program.start));
+    if (program.rating) push('Rating', program.rating);
+    if (program.lang) push('Language', program.lang.toUpperCase());
+    const creds = []; if (program.directors && program.directors.length) creds.push('Dir: ' + program.directors.join(', '));
+    if (program.actors && program.actors.length) creds.push('Cast: ' + program.actors.join(', '));
+    if (creds.length) push('Director & Cast', creds.join(' · '));
+    if (program.audio && program.audio.length) push('Audio', program.audio.join(', '));
+    if (program.cat) push('Genre', program.cat);
+  } else if (channel && channel.group) {
+    push('Group', channel.group);
+  }
+  if (!rows.length) { $('dMeta').innerHTML = ''; return; }
+  $('dMeta').innerHTML = rows.map(([k, v]) =>
+    `<span class="dm-k">${escapeHtml(k)}</span><span class="dm-v">${escapeHtml(v)}</span>`).join('');
+}
+
+// Show an image card in the drawer when a usable (http/https) icon exists.
+function setDrawerIcon(url) {
+  const wrap = $('dIcon'), img = $('dIconImg');
+  const usable = url && /^https?:\/\//i.test(url);
+  img.classList.add('hidden');
+  if (usable) {
+    img.onerror = () => { wrap.style.display = 'none'; };
+    img.onload = () => { wrap.style.display = 'block'; img.classList.remove('hidden'); };
+    img.src = url;
+  } else {
+    img.onerror = null; img.onload = null; img.removeAttribute('src');
+    wrap.style.display = 'none';
+  }
+}
+
+function showDetails(ch, p) {
+  state._drw = { ch, p };
+  const title = progTitle(p) || p.title || ch.name;
+  const desc = progDesc(p) || p.desc || 'No synopsis available.';
+  $('dTitle').textContent = title;
+  $('dSub').textContent = ch.name + (p.cat ? ' · ' + p.cat : '');
+  $('dTime').textContent = (p.start && p.stop) ? (fmtTime(p.start) + ' – ' + fmtTime(p.stop)) : '';
+  $('dDesc').textContent = desc;
+  const derr = $('dErr');
+  if (derr) {
+    const err = chErr(ch);
+    if (err) { derr.style.display = 'block'; derr.textContent = '⚠ Stream error: ' + err.msg; }
+    else derr.style.display = 'none';
+  }
+  $('dList').innerHTML = '';
+  setDrawerIcon((p.icon && p.icon.trim()) || (ch.logo && ch.logo.trim()));
+  renderMeta(p, ch);
+  $('dPlay').onclick = () => { playFor(ch); };
+  $('dWeb').onclick = () => { if (state.player === 'web') playChannel(ch); else playWeb(ch); };
+  refreshPlayerButtons();
+  openDetails();
+  if (state.translate) localizeDrawer(title, desc);
+}
+
+// Clicking a channel opens the bottom drawer: channel info, now program, upcoming list.
+function showChannelDetails(ch) {
+  const np = nowProgram(ch, Date.now());
+  const nowTitle = np ? (progTitle(np) || np.title) : '';
+  const nowDesc = np ? (progDesc(np) || np.desc || '') : '';
+  $('dTitle').textContent = ch.name;
+  $('dSub').textContent = (ch.group ? ch.group : '') + (ch.epg ? ' · has EPG' : ' · no EPG');
+  $('dTime').textContent = np ? ('Now: ' + nowTitle + '  ' + fmtTime(np.start) + '–' + fmtTime(np.stop)) : '';
+  $('dDesc').textContent = np ? (nowDesc || '') : 'No program information available for this channel.';
+  setDrawerIcon((np && np.icon && np.icon.trim()) || (ch.logo && ch.logo.trim()));
+  renderMeta(np, ch);
+  // upcoming program list
+  const now = Date.now();
+  const upcoming = (ch.programs || []).filter(p => p.stop > now).slice(0, 10);
+  if (upcoming.length) {
+    $('dList').innerHTML = '<div class="dl-head">Upcoming</div>' + upcoming.map(p => {
+      const pt = progTitle(p), pd = progDesc(p);
+      return `<div class="dl-item" data-start="${p.start}" data-stop="${p.stop}" ` +
+      `data-tt="${escapeHtml(pt)}" data-desc="${escapeHtml(pd)}" ` +
+      `data-cat="${escapeHtml(p.cat||'')}"><span class="dl-time">${fmtDateTime(p.start)}</span> ${escapeHtml(pt)}</div>`;
+    }).join('');
+    $('dList').querySelectorAll('.dl-item').forEach(it => {
+      it.addEventListener('click', () => {
+        showDetails(ch, { title: it.dataset.tt, desc: it.dataset.desc, cat: it.dataset.cat,
+          start: +it.dataset.start, stop: +it.dataset.stop });
+      });
+    });
+  } else {
+    $('dList').innerHTML = '';
+  }
+  $('dPlay').onclick = () => { playFor(ch); };
+  $('dWeb').onclick = () => { if (state.player === 'web') playChannel(ch); else playWeb(ch); };
+  refreshPlayerButtons();
+  openDetails();
+  if (state.translate && np) localizeDrawer(nowTitle, nowDesc);
+}
+// Translate the drawer title/description into the preferred language (async).
+async function localizeDrawer(title, desc) {
+  const [tt, dd] = await Promise.all([translateText(title, state.lang), translateText(desc, state.lang)]);
+  if (tt && tt !== title && $('dTitle').textContent === title) $('dTitle').textContent = tt;
+  if (dd && dd !== desc && $('dDesc').textContent === desc) $('dDesc').textContent = dd;
+}
+
+/* events */
+$('load').addEventListener('click', loadGuide);
+$('sample').addEventListener('click', sample);
+$('grab').addEventListener('click', autoGrab);
+$('group').addEventListener('change', () => { if (state.channels.length) render(); });
+$('filter').addEventListener('change', () => { if (state.channels.length) render(); });
+$('q').addEventListener('input', () => { if (state.channels.length) render(); });
+$('window').addEventListener('change', () => { if (state.channels.length) render(); });
+$('m3u').addEventListener('keydown', e => { if (e.key === 'Enter') loadGuide(); });
+$('xmltv').addEventListener('keydown', e => { if (e.key === 'Enter') loadGuide(); });
+$('dClose').addEventListener('click', closeDetails);
+
+// Horizontal wheel-scroll over the timeline (scroll rows left/right).
+stage.addEventListener('wheel', (e) => {
+  // Only intercept when there's horizontal overflow and the pointer is over the
+  // program area (right of the sticky channel column).
+  if (stage.scrollWidth <= stage.clientWidth) return;
+  const r = stage.getBoundingClientRect();
+  if (e.clientX - r.left < (document.body.classList.contains('tv') ? 300 : 240)) return; // over the channel column -> keep vertical
+  if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+    e.preventDefault();
+    stage.scrollLeft += e.deltaY;
+  }
+}, { passive: false });
+
+// Debounced vertical-scroll translation for newly visible tiles.
+stage.addEventListener('scroll', scheduleTranslate, { passive: true });
+
+// ---- Remote / keyboard navigation (TV-style) ----
+function rowHeight() { return document.body.classList.contains('tv') ? 96 : 72; }
+function rulerHeight() { return document.body.classList.contains('tv') ? 42 : 34; }
+function drawerHeight() {
+  const d = $('details');
+  return d.classList.contains('open') ? d.offsetHeight : 0;
+}
+function selectAt(idx) {
+  if (!state.view.length) return;
+  if (idx < 0) idx = 0;
+  if (idx >= state.view.length) idx = state.view.length - 1;
+  state.sel = idx;
+  // Move only the highlight class — avoid re-rendering the whole grid.
+  document.querySelectorAll('.row.selected').forEach(r => r.classList.remove('selected'));
+  const row = document.getElementById('row-' + idx);
+  if (row) {
+    row.classList.add('selected');
+    // Vertically scroll via arithmetic (uniform row height) — no DOM layout reads.
+    // Reserve the open drawer's height so the selected channel stays visible
+    // above the description panel. Rows begin below the ruler, so add its height.
+    const h = rowHeight();
+    const top = rulerHeight() + idx * h;
+    const vh = Math.max(0, stage.clientHeight - drawerHeight());
+    if (top < stage.scrollTop) stage.scrollTop = top - 8;
+    else if (top + h > stage.scrollTop + vh) stage.scrollTop = top + h - vh + 8;
+  }
+}
+function selChannel() { return state.sel != null ? state.view[state.sel] : null; }
+window.addEventListener('keydown', (e) => {
+if (e.key === 'Escape') {
+  if ($('overlay').classList.contains('open')) { closeSettings(); return; }
+  if ($('details').classList.contains('open')) { closeDetails(); return; }
+}
+// ignore when typing in an input/select/textarea
+const t = e.target;
+if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA')) return;
+if ($('webplayer').style.display === 'flex') { handlePlayerKey(e); return; }
+if (!state.view.length) return;
+switch (e.key) {
+  case 'ArrowDown': e.preventDefault(); selectAt((state.sel == null ? -1 : state.sel) + 1); break;
+  case 'ArrowUp':   e.preventDefault(); selectAt((state.sel == null ? 1 : state.sel) - 1); break;
+  case 'ArrowRight': e.preventDefault(); stage.scrollLeft += 140; break;
+  case 'ArrowLeft':  e.preventDefault(); stage.scrollLeft -= 140; break;
+  case 'Enter': {
+    const ch = selChannel(); if (ch) { e.preventDefault(); playFor(ch); dbgChanChange(ch, 'grid'); } break;
+  }
+  case ' ': {
+    const ch = selChannel(); if (ch) { e.preventDefault(); playFor(ch); dbgChanChange(ch, 'grid'); } break;
+  }
+}
+});
+// Re-render on resize so the timeline keeps filling the full width.
+(() => {
+  let t;
+  window.addEventListener('resize', () => {
+    clearTimeout(t);
+    t = setTimeout(() => { if (state.channels.length) render(); }, 150);
+  });
+})();
+
+/* ---------- jump-to-channel autocomplete ---------- */
+(function setupJump() {
+  const input = document.getElementById('chJump');
+  const box = document.getElementById('chJumpResults');
+  if (!input || !box) return;
+
+  const LIMIT = 60;
+  let active = -1;
+  let matches = [];
+
+  function close() { box.classList.remove('open'); box.innerHTML = ''; active = -1; }
+
+  function renderResults() {
+    if (!matches.length) {
+      box.innerHTML = '<div class="jr-none">no channel matches</div>';
+    } else {
+      box.innerHTML = matches.map((m, i) =>
+        `<div class="jr ${i===active?'active':''}" data-i="${i}">${escapeHtml(m.name)}` +
+        (m.group ? `<span class="g">${escapeHtml(m.group)}</span>` : '') + '</div>').join('');
+    }
+    box.classList.add('open');
+  }
+
+  function jumpTo(m) {
+    close();
+    input.value = '';
+    // clear filters so the channel is visible, then scroll
+    $('group').value = ''; $('filter').value = 'all'; $('q').value = '';
+    render();
+    const el = document.querySelector(`.row[data-src="${m._src}"]`);
+    if (el) el.scrollIntoView({ block: 'nearest' });
+  }
+
+  input.addEventListener('input', () => {
+    const q = input.value.trim().toLowerCase();
+    if (!q) { close(); return; }
+    matches = state.channels.filter(c => c.name.toLowerCase().includes(q)).slice(0, LIMIT);
+    active = -1;
+    renderResults();
+  });
+
+  input.addEventListener('keydown', (e) => {
+    if (!box.classList.contains('open')) return;
+    if (e.key === 'ArrowDown') { e.preventDefault(); active = Math.min(active + 1, matches.length - 1); renderResults(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); active = Math.max(active - 1, 0); renderResults(); }
+    else if (e.key === 'Enter') { e.preventDefault(); if (matches[active]) jumpTo(matches[active]); else if (matches[0]) jumpTo(matches[0]); }
+    else if (e.key === 'Escape') { close(); }
+  });
+
+  box.addEventListener('mousedown', (e) => {
+    const it = e.target.closest('.jr');
+    if (it) jumpTo(matches[parseInt(it.dataset.i, 10)]);
+  });
+
+  input.addEventListener('blur', () => setTimeout(close, 120));
+})();
+
+loadFav();
+loadDfmt();
+loadTv();
+try { const l = storageGet(LS_LANG, 'en'); if (/^[a-z]{2,3}$/.test(l)) state.lang = l; } catch (_) {}
+state.translate = storageGet(LS_TRANS, '0') === '1';
+state.fullscreen = storageGet(LS_FS, '0') === '1';
+state.relay = storageGet(LS_RELAY, '0') === '1';
+state.hw = storageGet(LS_HW, '0') === '1';
+state.chno = storageGet(LS_CHNO, '1') === '1';
+state.quality = storageGet(LS_QUALITY, 'auto');
+state.loadLast = storageGet(LS_LASTON, '1') === '1';
+state.h12 = storageGet(LS_H12, '0') === '1';
+state.adv = storageGet(LS_ADV, '0') === '1';
+state.proxy = storageGet(LS_PROXY, '');
+state.useProxy = storageGet(LS_USEPROXY, '0') === '1';
+state.vpn = storageGet(LS_VPN, '0') === '1';
+state.debug = storageGet(LS_DEBUG, '0') === '1';
+state.autoRestart = storageGet(LS_AR, '1') === '1';
+state.player = storageGet(LS_PLAYER, 'vlc') === 'web' ? 'web' : 'vlc';
+const _wb = parseInt(storageGet(LS_WEBUF, '30'), 10);
+state.webBuffer = (_wb >= 5 && _wb <= 90) ? _wb : 30;
+updatePlayerSeg();
+try { const nc = parseInt(storageGet(LS_NETCACHE, '3000'), 10); if (nc >= 300 && nc <= 10000) state.netCache = nc; } catch (_) {}
+refreshSavedDropdown('');
+// Auto-reopen the last loaded source so the guide isn't empty on start.
+(function autoOpenLast() {
+  if (!state.loadLast) return;
+  const last = storageGet(LS_LAST, '');
+  if (!last) return;
+  const s = savedSources().find(x => x.name === last);
+  if (!s) return;
+  $('m3u').value = s.m3u;
+  $('xmltv').value = s.xmltv || '';
+  loadGuide();
+})();
+</script>
+</body>
+</html>
