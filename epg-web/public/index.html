@@ -2064,7 +2064,7 @@ async function openDbg() {
     '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
       '<button class="stats-copy" id="dbgExport">⬇ Export JSON</button>' +
       '<button class="stats-copy" id="dbgCopy">⧉ Copy</button>' +
-      '<button class="stats-copy" id="dbgClear">Clear client</button>' +
+      '<button class="stats-copy" id="dbgClear">🧹 Clear (fresh)</button>' +
       '<button class="stats-copy" id="dbgClose">Close</button>' +
     '</div>';
   ov.style.display = 'block';
@@ -2079,7 +2079,12 @@ async function openDbg() {
     try { navigator.clipboard.writeText(JSON.stringify(payload, null, 2)); toast('Debug records copied'); }
     catch (_) { exportDbg(srv); }
   };
-  $('dbgClear').onclick = () => { dbg.events = []; openDbg(); };
+  $('dbgClear').onclick = async () => {
+    dbg.events = [];
+    try { await fetch('/debugreset', { method: 'POST', body: '{}', headers: { 'Content-Type': 'application/json' } }); } catch (_) {}
+    toast('Fresh debug session');
+    openDbg();
+  };
   $('dbgClose').onclick = () => { ov.style.display = 'none'; };
 }
 function exportDbg(srv) {

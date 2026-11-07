@@ -1391,6 +1391,13 @@ const server = http.createServer(async (req, res) => {
       return sendJSON(res, 200, { now: Date.now(), events: serverEvents });
     }
 
+    // Clear the server-side debug event ring (fresh debug session).
+    if (p === '/debugreset' && req.method === 'POST') {
+      await readBody(req);
+      serverEvents.length = 0;
+      return sendJSON(res, 200, { cleared: true });
+    }
+
     // Probe free HTTP proxies (clarketm/proxy-list) — best-effort helper for
     // geo-blocked streams. Returns only proxies that answer an HTTP CONNECT.
     if (p === '/proxylist' && req.method === 'GET') {
