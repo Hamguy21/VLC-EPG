@@ -438,7 +438,9 @@
     width:min(520px, 92vw); max-height:60vh; overflow-y:auto; z-index:140;
     background:var(--panel); border:1px solid var(--border); border-radius:12px;
     box-shadow:0 12px 40px rgba(0,0,0,.5); padding:8px; }
-  .gridview .gchlist .gcl-head { font-size:12px; opacity:.65; padding:4px 6px; }
+  .gridview .gchlist .gcl-head { font-size:12px; opacity:.65; padding:4px 6px; display:flex; align-items:center; justify-content:space-between; }
+  .gridview .gchlist .gcl-close { border:none; background:transparent; color:var(--muted); cursor:pointer; font-size:13px; padding:0 4px; }
+  .gridview .gchlist .gcl-close:hover { color:var(--text); }
   .gridview .gchlist .gcl-item { display:flex; align-items:center; gap:10px; padding:8px 10px;
     border-radius:8px; cursor:pointer; }
   .gridview .gchlist .gcl-item:hover { background:rgba(86,115,245,.15); }

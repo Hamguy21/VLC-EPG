@@ -1421,7 +1421,7 @@ function showGridList(q) {
   const query = (q || '').trim().toLowerCase();
   const grp = $('gridGroup') ? $('gridGroup').value : '';
   const matches = state.channels.filter(c => c.url && (!grp || c.group === grp) && (!query || c.name.toLowerCase().includes(query))).slice(0, 200);
-  list.innerHTML = '<div class="gcl-head">Choose a channel' + (state._gridArmed != null ? ' — player ' + (state._gridArmed+1) : '') + '</div>' +
+  list.innerHTML = '<div class="gcl-head"><span>Choose a channel' + (state._gridArmed != null ? ' — player ' + (state._gridArmed+1) : '') + '</span><button class="gcl-close" data-x="1" title="Close">✕</button></div>' +
     (matches.length
       ? matches.map(c => `<div class="gcl-item" data-n="${escapeHtml(c.name)}"><span class="gcl-name">${escapeHtml(c.name)}</span>${c.group ? `<span class="gcl-group">${escapeHtml(c.group)}</span>` : ''}</div>`).join('')
       : '<div class="gcl-item" style="opacity:.6;cursor:default">No channels match</div>');
@@ -1431,6 +1431,7 @@ function showGridList(q) {
       if (ch) assignGridChannel(ch);
     });
   });
+  const x = list.querySelector('.gcl-close'); if (x) x.addEventListener('click', hideGridList);
   list.style.display = 'block';
 }
 function hideGridList() { const l = $('gridChList'); if (l) l.style.display = 'none'; }
@@ -1498,8 +1499,8 @@ $('gridSearch').addEventListener('keydown', e => {
     if (first) { const ch = state.view.find(c => c.name === first.dataset.n && c.url); if (ch) assignGridChannel(ch); }
   } else if (e.key === 'Escape') { hideGridList(); }
 });
-$('gridView').addEventListener('click', e => {
-  if (e.target === $('gridView')) hideGridList();
+document.addEventListener('click', e => {
+  if (!e.target.closest('#gridChList') && !e.target.closest('#gridSearch')) hideGridList();
 });
 document.addEventListener('keydown', gridZapKey);
 
