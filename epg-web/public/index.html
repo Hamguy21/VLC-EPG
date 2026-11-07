@@ -269,6 +269,7 @@
       <input type="text" id="gridSearch" placeholder="Type to choose a channel…" autocomplete="off">
       <div class="jump-results" id="gridResults"></div>
     </span>
+    <select id="gridGroup" title="Filter channels by group"><option value="">All groups</option></select>
     <span class="ghint">click a square then pick a channel · ✕ closes it · up to 4</span>
     <button class="btn ghost small" id="gridAdd">＋ Add channel</button>
     <button class="btn ghost small" id="gridClose">✕ Close</button>
@@ -1283,6 +1284,7 @@ function openGrid() {
   $('gridCells').innerHTML = '';
   gv.style.display = 'flex';
   $('gridSearch').value = ''; hideGridList();
+  const gg = $('gridGroup'); if (gg) { gg.innerHTML = '<option value="">All groups</option>' + state.groups.map(g => `<option>${escapeHtml(g)}</option>`).join(''); }
   addSlot(); // default: one player
   $('gridAdd').focus();
 }
@@ -1404,7 +1406,8 @@ function assignGridChannel(ch) {
 function showGridList(q) {
   const list = $('gridChList'); if (!list) return;
   const query = (q || '').trim().toLowerCase();
-  const matches = state.channels.filter(c => c.url && (!query || c.name.toLowerCase().includes(query))).slice(0, 200);
+  const grp = $('gridGroup') ? $('gridGroup').value : '';
+  const matches = state.channels.filter(c => c.url && (!grp || c.group === grp) && (!query || c.name.toLowerCase().includes(query))).slice(0, 200);
   list.innerHTML = '<div class="gcl-head">Choose a channel' + (state._gridArmed != null ? ' — player ' + (state._gridArmed+1) : '') + '</div>' +
     (matches.length
       ? matches.map(c => `<div class="gcl-item" data-n="${escapeHtml(c.name)}"><span class="gcl-name">${escapeHtml(c.name)}</span>${c.group ? `<span class="gcl-group">${escapeHtml(c.group)}</span>` : ''}</div>`).join('')
@@ -1441,6 +1444,7 @@ $('gridBtn').addEventListener('click', openGrid);
 $('gridClose').addEventListener('click', closeGrid);
 $('gridAdd').addEventListener('click', addSlot);
 $('gridSearch').addEventListener('input', () => { showGridList($('gridSearch').value); });
+$('gridGroup').addEventListener('change', () => { if ($('gridChList').style.display === 'block') showGridList($('gridSearch').value); });
 $('gridSearch').addEventListener('keydown', e => {
   if (e.key === 'Enter') {
     const first = $('gridChList').querySelector('.gcl-item[data-n]');
