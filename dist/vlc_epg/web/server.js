@@ -916,11 +916,16 @@ async function startMp4Relay(url, opts) {
     };
     const parseAudioTracks = () => {
       const out = [];
+      const seen = new Set();
       const text = r.head.join('\n');
-      const re = /Stream #0:(\d+)\(?([a-z]{2,3})?\)?: Audio: ([^\s,]+)/g;
+      const re = /Stream #0:(\d+)(?:\(([^)]+)\))?: Audio: ([^\s,]+)/g;
       let m;
       while ((m = re.exec(text))) {
-        out.push({ index: parseInt(m[1], 10), lang: m[2] || '', codec: m[3] });
+        const idx = parseInt(m[1], 10);
+        const key = idx + '|' + (m[2] || '') + '|' + m[3];
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push({ index: idx, lang: m[2] || '', codec: m[3] });
       }
       return out;
     };

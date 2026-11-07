@@ -1885,11 +1885,11 @@ function showCtx(x, y, hasStats) {
   const menu = $('ctxMenu');
   const q = state.quality;
   const tracks = window._audioTracks || [];
-  const audioHtml = tracks.length > 1
+  const audioHtml = tracks.length
     ? `<div class="ctx-sep"></div><div class="ctx-item ctx-ah"><span>Audio track</span></div>` +
       tracks.map(t => {
         const lang = t.lang ? ' (' + t.lang + ')' : '';
-        const on = state._aIdx === t.index ? '✓' : '';
+        const on = state._aIdx === t.index || (state._aIdx == null && t.index === (tracks[0].index)) ? '✓' : '';
         return `<div class="ctx-item" data-act="a-${t.index}"><span>&nbsp;&nbsp;${escapeHtml(t.codec)}${escapeHtml(lang)}</span><span class="chk">${on}</span></div>`;
       }).join('')
     : '';
