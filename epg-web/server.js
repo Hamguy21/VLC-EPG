@@ -579,25 +579,39 @@ function probeProxy(host, port, timeoutMs) {
   });
 }
 async function startMp4WithRetry(url, opts) {
-  try { return await startMp4Relay(url, opts); }
-  catch (e) {
-    if (e && e.status === 422 && !opts._retried) {
-      opts._retried = true;
-      const msg = String(e.message || '');
-      // Some streams carry MP2 (or other non-AAC) audio; the aac_adtstoasc
-      // bitstream filter only supports AAC, so drop it on the retry.
-      if (/aac_adtstoasc|not supported by the bitstream filter|\bmp2\b/i.test(msg)) {
-        opts.noBsf = true;
+  // Attempt 0: normal relay (copy by default, or requested scale/tc/sub).
+  // Attempt 1: same, with stream-hygiene fixes (bsf/map).
+  // Attempt 2: stable low-quality transcode (capped 854px, ultrafast) so a
+  //   copy-unfriendly source still plays instead of stalling/pausing.
+  for (let attempt = 0; ; attempt++) {
+    try { return await startMp4Relay(url, opts); }
+    catch (e) {
+      if (e && e.status === 422 && attempt === 0) {
+        const msg = String(e.message || '');
+        // Some streams carry MP2 (or other non-AAC) audio; the aac_adtstoasc
+        // bitstream filter only supports AAC, so drop it on the retry.
+        if (/aac_adtstoasc|not supported by the bitstream filter|\bmp2\b/i.test(msg)) {
+          opts.noBsf = true;
+        }
+        // A selected audio stream that belongs to a non-selected HLS variant
+        // can't be re-mapped; fall back to the default audio rather than fail.
+        if (/matches no streams|option 'map'|Stream map/i.test(msg)) {
+          opts.aIdx = undefined;
+        }
+        sev('relay_startup_retry', { noBsf: !!opts.noBsf, dropAIdx: opts.aIdx === undefined });
+        continue;
       }
-      // A selected audio stream that belongs to a non-selected HLS variant
-      // can't be re-mapped; fall back to the default audio rather than fail.
-      if (/matches no streams|option 'map'|Stream map/i.test(msg)) {
-        opts.aIdx = undefined;
+      // Last resort: stable low-quality transcode (runs faster than real-time,
+      // so the buffer holds and playback stays continuous).
+      const stable = attempt === 1 && !opts.stable;
+      if (stable) {
+        opts.stable = true;
+        opts.scale = 'low';
+        sev('relay_startup_stable', { id: opts.id });
+        continue;
       }
-      sev('relay_startup_retry', { noBsf: !!opts.noBsf, dropAIdx: opts.aIdx === undefined });
-      return startMp4Relay(url, opts);
+      throw e;
     }
-    throw e;
   }
 }
 async function plFetchProxied(proxy, rel) {
@@ -991,7 +1005,9 @@ async function startMp4Relay(url, opts) {
     } else if (qScale) {
       args.push('-map', '0:v:0', '-map', '0:a:' + (o.aIdx || 0));
       args.push('-vf', qScale);
-      args.push('-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '30', '-c:a', 'aac', '-b:a', '128k');
+      args.push('-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '30');
+      if (o.stable) args.push('-maxrate', '1500k', '-bufsize', '3000k');
+      args.push('-c:a', 'aac', '-b:a', '96k');
     } else if (tc) {
       args.push('-map', '0:v:0', '-map', '0:a:' + (o.aIdx || 0), '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28', '-c:a', 'aac', '-b:a', '128k');
     } else if (o.noBsf) {
