@@ -310,7 +310,9 @@
   .mini-player .mp-head { display:flex; align-items:center; justify-content:space-between;
     height:34px; box-sizing:border-box; position:relative; z-index:1;
     padding:8px 12px; font-size:13px; font-weight:600; background:var(--panel2); cursor:move;
-    user-select:none; -webkit-user-select:none; }
+    user-select:none; -webkit-user-select:none; transition:opacity .25s; }
+  .mini-player.idle .mp-head, .webplayer.idle .wp-head { opacity:0; pointer-events:none; }
+  .webplayer .wp-head { transition:opacity .25s; }
   .mini-player .mp-title { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .mini-player .mp-close { border:none; background:transparent; color:var(--muted);
     font-size:14px; cursor:pointer; line-height:1; padding:2px 4px; }

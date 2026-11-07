@@ -1502,6 +1502,30 @@ function initMiniControls() {
   vol.addEventListener('input', () => { vid.volume = (+vol.value) / 100; vid.muted = vol.value === '0'; upd(); });
 }
 initMiniControls();
+
+// Auto-hide the player header when idle (mouse still). Move the mouse or press
+// Up (remote) to reveal it.
+function armPlayerAutoHide() {
+  if (window._playerAutoHide) return; window._playerAutoHide = true;
+  const map = [['webplayer', 'wp-head'], ['miniPlayer', 'mp-head']];
+  const openBox = () => {
+    for (const [id, hdr] of map) {
+      const el = $(id); if (el && el.style.display !== 'none') return { box: el, hdr };
+    }
+    return null;
+  };
+  let t = null;
+  const hide = (o) => o && o.box.classList.add('idle');
+  const kick = () => {
+    const o = openBox(); if (!o) return;
+    o.box.classList.remove('idle');
+    clearTimeout(t);
+    t = setTimeout(() => hide(o), 2800);
+  };
+  document.addEventListener('mousemove', kick);
+  document.addEventListener('keydown', e => { if (e.key === 'ArrowUp') kick(); });
+}
+armPlayerAutoHide();
 function applyWebFs(on) {
   const el = $('webplayer');
   try {
