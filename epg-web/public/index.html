@@ -445,9 +445,9 @@
 <div class="overlay" id="overlay" role="presentation">
   <div class="panel" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
     <h2 id="settingsTitle">Settings</h2>
-    <div class="p-sub">Use the dividers to group related options.</div>
+    <div class="p-sub">Changes apply immediately.</div>
 
-    <div class="p-section">Playback</div>
+    <div class="p-section">Playback · VLC</div>
     <div class="p-row">
       <span class="p-lbl">Player</span>
       <select id="playerSel" class="pref-lang">
@@ -456,14 +456,36 @@
       </select>
     </div>
     <div class="p-row">
-      <span class="p-lbl">Network cache (ms) — raise if video drops after a few seconds</span>
+      <span class="p-lbl">Network cache (ms) — VLC only; raise if video drops after a few seconds</span>
       <input type="number" id="netCache" min="300" max="10000" step="100" style="width:100%;padding:7px 10px;border-radius:8px;border:1px solid var(--border);background:var(--panel2);color:var(--text);font-size:13px">
     </div>
     <div class="p-row">
       <label class="fmt-opt" style="display:inline-flex;gap:8px">
-        <input type="checkbox" id="fsMode"> Open channels in fullscreen
+        <input type="checkbox" id="fsMode"> Open channels in fullscreen (VLC and Web)
       </label>
     </div>
+    <div class="p-row">
+      <label class="fmt-opt" style="display:inline-flex;gap:8px">
+        <input type="checkbox" id="hwMode"> Hardware decoding (VLC, DXVA2)
+      </label>
+    </div>
+    <div class="p-row">
+      <label class="fmt-opt" style="display:inline-flex;gap:8px">
+        <input type="checkbox" id="arMode"> Auto-restart segmented channels (e.g. Pluto)
+      </label>
+    </div>
+    <div class="p-row">
+      <span class="p-lbl">Stream quality (preference; VLC uses adaptive HLS)</span>
+      <select id="qualitySel" class="pref-lang">
+        <option value="auto">Auto</option>
+        <option value="high">High</option>
+        <option value="medium">Medium</option>
+        <option value="low">Low</option>
+      </select>
+    </div>
+
+    <div class="p-divider"></div>
+    <div class="p-section">Web player</div>
     <div class="p-row">
       <label class="fmt-opt" style="display:inline-flex;gap:8px">
         <input type="checkbox" id="relayMode"> Use FFmpeg relay (fixes streams that drop, e.g. Pluto)
@@ -475,11 +497,6 @@
     </div>
     <div class="p-row">
       <label class="fmt-opt" style="display:inline-flex;gap:8px">
-        <input type="checkbox" id="hwMode"> Hardware decoding (VLC, DXVA2)
-      </label>
-    </div>
-    <div class="p-row">
-      <label class="fmt-opt" style="display:inline-flex;gap:8px">
         <input type="checkbox" id="chnoMode"> Show channel number on video (auto-hides)
       </label>
     </div>
@@ -487,16 +504,6 @@
       <span class="p-lbl">Connection speed test</span>
       <button class="btn ghost small" id="speedtestBtn" style="margin-top:6px">▶ Run speed test</button>
       <div id="speedResult" style="margin-top:6px;font-size:12px;color:var(--muted)"></div>
-    </div>
-    <div class="p-row">
-      <label class="fmt-opt" style="display:inline-flex;gap:8px">
-        <input type="checkbox" id="dbgMode"> Debug mode (record player/server events; Debug in the video menu)
-      </label>
-    </div>
-    <div class="p-row">
-      <label class="fmt-opt" style="display:inline-flex;gap:8px">
-        <input type="checkbox" id="arMode"> Auto-restart segmented channels (e.g. Pluto)
-      </label>
     </div>
 
     <div class="p-divider"></div>
@@ -516,6 +523,14 @@
     </div>
 
     <div class="p-divider"></div>
+    <div class="p-section">Startup</div>
+    <div class="p-row">
+      <label class="fmt-opt" style="display:inline-flex;gap:8px">
+        <input type="checkbox" id="loadLastMode"> Reload the last source on start
+      </label>
+    </div>
+
+    <div class="p-divider"></div>
     <div class="p-section">Language &amp; translation</div>
     <div class="p-row">
       <span class="p-lbl">Preferred language</span>
@@ -529,7 +544,16 @@
       <button class="btn ghost small" id="retranslate" style="margin-top:8px" title="Clear the translation cache and re-translate the visible programmes">⟳ Retranslate now</button>
     </div>
 
+    <div class="p-divider"></div>
+    <div class="p-section">Debug</div>
+    <div class="p-row">
+      <label class="fmt-opt" style="display:inline-flex;gap:8px">
+        <input type="checkbox" id="dbgMode"> Debug mode (record player/server events; Debug in the video menu)
+      </label>
+    </div>
+
     <div class="p-actions">
+      <button class="btn ghost" id="resetSettings" title="Clear all saved settings (not your saved sources)">Reset settings</button>
       <button class="btn ghost" id="settClose">Close</button>
     </div>
   </div>
@@ -563,7 +587,7 @@
 <script>
 const $ = id => document.getElementById(id);
 const stage = $('stage');
-const state = { channels: [], groups: [], now: Date.now(), fav: new Set(), current: null, dfmt: 'DMY', sel: null, view: [], lang: 'en', translate: false, fullscreen: false, netCache: 3000, relay: false, player: 'vlc', webBuffer: 30, hw: false, quality: 'auto', debug: false, autoRestart: true, chno: true };
+const state = { channels: [], groups: [], now: Date.now(), fav: new Set(), current: null, dfmt: 'DMY', sel: null, view: [], lang: 'en', translate: false, fullscreen: false, netCache: 3000, relay: false, player: 'vlc', webBuffer: 30, hw: false, quality: 'auto', debug: false, autoRestart: true, chno: true, loadLast: true };
 let timer = null, toastTimer = null, activeLoadId = 0;
 const LS_SOURCES = 'vlcEpgSources';
 const LS_FAV = 'vlcEpgFavorites';
@@ -580,6 +604,8 @@ const LS_LAST = 'vlcEpgLastSrc';
 const LS_DEBUG = 'vlcEpgDebug';
 const LS_AR = 'vlcEpgAutoRestart';
 const LS_CHNO = 'vlcEpgChno';
+const LS_QUALITY = 'vlcEpgQuality';
+const LS_LASTON = 'vlcEpgLoadLast';
 
 function storageGet(key, fallback) {
   try { const value = localStorage.getItem(key); return value == null ? fallback : value; }
@@ -918,6 +944,8 @@ function openSettings() {
   $('fsMode').checked = state.fullscreen;
   $('hwMode').checked = state.hw;
   $('chnoMode').checked = state.chno;
+  $('qualitySel').value = state.quality;
+  $('loadLastMode').checked = state.loadLast;
   $('dbgMode').checked = state.debug;
   $('arMode').checked = state.autoRestart;
   $('netCache').value = state.netCache;
@@ -948,6 +976,27 @@ $('chnoMode').addEventListener('change', e => {
   storageSet(LS_CHNO, state.chno ? '1' : '0');
   if (!state.chno) { const cn = $('wpChno'); if (cn) cn.classList.remove('show'); }
   toast('Channel number ' + (state.chno ? 'on' : 'off'));
+});
+$('qualitySel').addEventListener('change', e => {
+  state.quality = e.target.value;
+  storageSet(LS_QUALITY, state.quality);
+  toast('Stream quality preference: ' + state.quality);
+});
+$('loadLastMode').addEventListener('change', e => {
+  state.loadLast = e.target.checked;
+  storageSet(LS_LASTON, state.loadLast ? '1' : '0');
+  toast('Reload last source on start ' + (state.loadLast ? 'on' : 'off'));
+});
+$('resetSettings').addEventListener('click', () => {
+  if (!confirm('Reset all settings to defaults? (Saved sources are kept)')) return;
+  const keep = new Set(['vlcEpgSources', 'vlcEpgLastSrc']);
+  const out = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (k && k.startsWith('vlcEpg') && !keep.has(k)) out.push(k);
+  }
+  out.forEach(k => localStorage.removeItem(k));
+  location.reload();
 });
 $('dbgMode').addEventListener('change', e => {
   state.debug = e.target.checked;
@@ -1410,6 +1459,7 @@ async function playWeb(ch) {
   $('wpTitle').textContent = ch.name;
   state._cur = ch;
   $p.style.display = 'flex';
+  if (state.fullscreen) applyWebFs(true);
   showLoader(true);
   dbgLog('web_open', { ch: ch.name });
   state._qf = 0;   // fresh channel -> clear ad-loop backoff counter
@@ -1433,6 +1483,13 @@ async function playWeb(ch) {
 function showLoader(on) {
   const l = $('wpLoading'); if (l) l.style.display = on ? 'flex' : 'none';
   const v = $('wpVideo'); if (v) v.controls = !on;  // hide native spinner so only ours shows
+}
+function applyWebFs(on) {
+  const el = $('webplayer');
+  try {
+    if (on) { if (!document.fullscreenElement && el.requestFullscreen) el.requestFullscreen(); }
+    else if (document.fullscreenElement) document.exitFullscreen();
+  } catch (_) {}
 }
 
 // ---- Debug mode: record player/server events for diagnosis ----
@@ -1588,6 +1645,7 @@ function closeWeb() {
   clearTimeout(chnoTimer); clearTimeout(npTimer); npBuf = '';
   $('ctxMenu').style.display = 'none'; $('statsOverlay').style.display = 'none'; $('dbgOverlay').style.display = 'none'; showLoader(false);
   $('webplayer').style.display = 'none';
+  applyWebFs(false);
   post('/stop', {}).catch(() => {});
 }
 /* ---- player channel tools: next/prev, transparent list, number badge, numberpad ---- */
@@ -1826,11 +1884,19 @@ async function openDbg() {
     '<pre style="max-height:300px;overflow:auto;white-space:pre-wrap;font:10px/1.4 ui-monospace,Consolas,monospace;margin:0 0 8px">' + escapeHtml(lines) + '</pre>' +
     '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
       '<button class="stats-copy" id="dbgExport">⬇ Export JSON</button>' +
+      '<button class="stats-copy" id="dbgCopy">⧉ Copy</button>' +
       '<button class="stats-copy" id="dbgClear">Clear client</button>' +
       '<button class="stats-copy" id="dbgClose">Close</button>' +
     '</div>';
   ov.style.display = 'block';
   $('dbgExport').onclick = () => exportDbg(srv);
+  $('dbgCopy').onclick = () => {
+    const payload = { app: 'vlc-epg', exportedAt: new Date().toISOString(),
+      state: { quality: state.quality, relay: state.relay, buffer: state.webBuffer, hw: state.hw },
+      clientEvents: dbg.events, serverEvents: srv };
+    try { navigator.clipboard.writeText(JSON.stringify(payload, null, 2)); toast('Debug records copied'); }
+    catch (_) { exportDbg(srv); }
+  };
   $('dbgClear').onclick = () => { dbg.events = []; openDbg(); };
   $('dbgClose').onclick = () => { ov.style.display = 'none'; };
 }
@@ -2146,6 +2212,8 @@ state.fullscreen = storageGet(LS_FS, '0') === '1';
 state.relay = storageGet(LS_RELAY, '0') === '1';
 state.hw = storageGet(LS_HW, '0') === '1';
 state.chno = storageGet(LS_CHNO, '1') === '1';
+state.quality = storageGet(LS_QUALITY, 'auto');
+state.loadLast = storageGet(LS_LASTON, '1') === '1';
 state.debug = storageGet(LS_DEBUG, '0') === '1';
 state.autoRestart = storageGet(LS_AR, '1') === '1';
 state.player = storageGet(LS_PLAYER, 'vlc') === 'web' ? 'web' : 'vlc';
@@ -2154,6 +2222,7 @@ try { const nc = parseInt(storageGet(LS_NETCACHE, '3000'), 10); if (nc >= 300 &&
 refreshSavedDropdown('');
 // Auto-reopen the last loaded source so the guide isn't empty on start.
 (function autoOpenLast() {
+  if (!state.loadLast) return;
   const last = storageGet(LS_LAST, '');
   if (!last) return;
   const s = savedSources().find(x => x.name === last);
