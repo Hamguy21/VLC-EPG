@@ -126,3 +126,50 @@ See `epg-web/README.md` for details.
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+## Web UI (companion TV guide)
+
+The repo also ships a zero-dependency Node web app (`epg-web/`) that renders the
+same channels as a full TV-guide grid with an in-browser player (FFmpeg relay),
+search/favorites, translation, and settings:
+
+```text
+vlc-epg/
+├── src/vlc_epg.lua        -> VLC extension (single file)
+├── epg-web/               -> the website / web UI
+│   ├── server.js          -> Node HTTP server (port 8123)
+│   ├── package.json       -> `npm start` runs the server
+│   └── public/
+│       ├── index.html     -> the app shell
+│       ├── style.css      -> layout & component styles
+│       └── theme.css      -> ★ edit this to re-skin (colors/variables)
+├── tests/                 -> Lua unit + integration tests
+└── examples/              -> sample playlist/guide fixtures
+```
+
+### Run the web UI
+
+```bash
+cd epg-web
+npm start          # -> http://127.0.0.1:8123
+```
+
+(The server itself is zero-dependency — `npm start` is just a convenience
+wrapper around `node server.js`; you don't need to `npm install` to run it.)
+
+### Customizing the look & feel
+
+All colors and most styling knobs live in **`public/theme.css`** — a single
+`:root` block of CSS variables. Edit it to re-skin the whole app without
+touching any markup or logic:
+
+```css
+:root {
+  --bg:#0f1115; --panel:#161a21; --panel2:#1d222b; --border:#2a313d;
+  --text:#e6e9ef; --muted:#8b93a3; --accent:#5673f5; --accent2:#6b8aff;
+  --now:#ff4d5e; --grid:#232a35; --star:#f5c542;
+}
+```
+
+Layout and component rules live separately in `public/style.css` for deeper
+changes.

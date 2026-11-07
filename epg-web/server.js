@@ -1504,20 +1504,33 @@ const server = http.createServer(async (req, res) => {
       return sendJSON(res, 200, { text: gout, from: (gdata && gdata[2]) || 'auto' });
     }
 
-    // Serve bundled vendor assets (e.g. hls.min.js) from public/vendor.
-    if (p.startsWith('/vendor/')) {
-      const abs = path.join(PUBLIC_DIR, path.normalize(p.slice(1)));
-      if (!abs.startsWith(PUBLIC_DIR + path.sep)) return sendJSON(res, 403, { error: 'forbidden' });
-      fs.readFile(abs, (err, buf) => {
-        if (err) return sendJSON(res, 404, { error: 'not found' });
-        res.writeHead(200, {
-          'Content-Type': abs.endsWith('.js') ? 'application/javascript' : 'application/octet-stream',
-          'Content-Length': buf.length,
-          'Cache-Control': 'max-age=86400',
+    // Serve bundled/static assets (style.css, theme.css, hls.min.js, svg, ...).
+    if (req.method === 'GET') {
+      const ext = path.extname(p).toLowerCase();
+      const ASSET_CT = {
+        '.css': 'text/css; charset=utf-8',
+        '.js': 'application/javascript; charset=utf-8',
+        '.svg': 'image/svg+xml',
+        '.png': 'image/png',
+        '.ico': 'image/x-icon',
+        '.json': 'application/json; charset=utf-8',
+        '.map': 'application/json',
+      };
+      if (ASSET_CT[ext]) {
+        const rel = p.replace(/^\/+/, '');
+        const abs = path.join(PUBLIC_DIR, path.normalize(rel));
+        if (!abs.startsWith(PUBLIC_DIR + path.sep)) return sendJSON(res, 403, { error: 'forbidden' });
+        fs.readFile(abs, (err, buf) => {
+          if (err) return sendJSON(res, 404, { error: 'not found' });
+          res.writeHead(200, {
+            'Content-Type': ASSET_CT[ext],
+            'Content-Length': buf.length,
+            'Cache-Control': 'max-age=600',
+          });
+          res.end(buf);
         });
-        res.end(buf);
-      });
-      return;
+        return;
+      }
     }
 
     // Serve local HLS segments produced by the FFmpeg relay.
