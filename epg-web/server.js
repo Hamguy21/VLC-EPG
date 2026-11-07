@@ -503,6 +503,19 @@ function makeLocalProxy(longUrl) {
 }
 // Intermittent upstream (silo) segment failures can kill a freshly-started
 // relay. Retry once with a fresh session before giving up.
+// Test whether an HTTP proxy answers CONNECT (ffmpeg's http_proxy uses HTTP proxies).
+function probeProxy(host, port, timeoutMs) {
+  return new Promise(resolve => {
+    const started = Date.now();
+    let done = false;
+    const req = http.request({ host, port, method: 'CONNECT', path: 'example.com:80', timeout: timeoutMs, headers: { Host: 'example.com' } });
+    const finish = v => { if (!done) { done = true; try { req.destroy(); } catch (_) {} resolve(v); } };
+    req.on('connect', res => finish(res.statusCode === 200 ? { ms: Date.now() - started } : null));
+    req.on('error', () => finish(null));
+    req.on('timeout', () => finish(null));
+    req.end();
+  });
+}
 async function startMp4WithRetry(url, opts) {
   try { return await startMp4Relay(url, opts); }
   catch (e) {
@@ -649,7 +662,7 @@ function stopRelay() {
 }
 // Start an FFmpeg relay and wait until its HLS playlist exists. Returns the
 // local play URL. Caller decides what plays it (VLC or a web player).
-async function startRelay(url) {
+async function startRelay(url, opts = {}) {
   if (/pluto\.tv/i.test(url)) { try { const f = await plutoFreshUrl(url); if (f) url = f; } catch (_) {} }
   return new Promise((resolve, reject) => {
     if (!FFMPEG) return reject(new Error('FFmpeg is not available on this system'));
@@ -672,8 +685,10 @@ async function startRelay(url) {
       '-hls_segment_filename', path.join(dir, 'seg_%05d.ts'),
       playlist,
     ];
+    const childEnv = { ...process.env };
+    if (opts.proxy) { childEnv.http_proxy = opts.proxy; childEnv.https_proxy = opts.proxy; childEnv.all_proxy = opts.proxy; }
     let child;
-    try { child = spawn(FFMPEG, args, { detached: false }); }
+    try { child = spawn(FFMPEG, args, { detached: false, env: childEnv }); }
     catch (e) { return reject(new Error('failed to start FFmpeg: ' + e.message)); }
     relayChild = child; relayDir = dir;
     const errLines = [];
@@ -836,8 +851,10 @@ async function startMp4Relay(url, opts) {
     args.push('-fflags', '+genpts+flush_packets+discardcorrupt', '-f', 'mp4',
       '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
       '-frag_duration', '500000', file);
+    const childEnv = { ...process.env };
+    if (opts.proxy) { childEnv.http_proxy = opts.proxy; childEnv.https_proxy = opts.proxy; childEnv.all_proxy = opts.proxy; }
     let child;
-    try { child = spawn(FFMPEG, args, { detached: false }); }
+    try { child = spawn(FFMPEG, args, { detached: false, env: childEnv }); }
     catch (e) { return reject(new Error('failed to start FFmpeg: ' + e.message)); }
     mp4Child = child; mp4File = file; mp4Slug = slug; mp4BufferMs = bufferMs;
     sev('relay_start', { slug, url });
@@ -1358,15 +1375,46 @@ const server = http.createServer(async (req, res) => {
     if (p === '/stream' && req.method === 'POST') {
       if (req.headers['content-type']?.split(';')[0].trim() !== 'application/json')
         throw Object.assign(new Error('content-type must be application/json'), { status: 415 });
-      const { url } = parseJSON(await readBody(req));
+      const { url, proxy } = parseJSON(await readBody(req));
       if (typeof url !== 'string' || !url.trim()) throw Object.assign(new Error('url is required'), { status: 400 });
-      const r = await startRelay(url);
+      const r = await startRelay(url, { proxy: proxy || '' });
       return sendJSON(res, 200, r);
     }
 
     // Server-side diagnostic log (for Debug mode export).
     if (p === '/debuglog' && req.method === 'GET') {
       return sendJSON(res, 200, { now: Date.now(), events: serverEvents });
+    }
+
+    // Probe free HTTP proxies (clarketm/proxy-list) — best-effort helper for
+    // geo-blocked streams. Returns only proxies that answer an HTTP CONNECT.
+    if (p === '/proxylist' && req.method === 'GET') {
+      const q = (req.url.split('?')[1] || '');
+      const getI = (k, d) => { const m = q.match(new RegExp('[?&]' + k + '=(\\d+)')); return m ? parseInt(m[1], 10) : d; };
+      const limit = Math.max(1, Math.min(30, getI('limit', 10)));
+      const timeout = Math.max(1000, Math.min(6000, getI('timeout', 3500)));
+      let list = [];
+      try {
+        const buf = await fetchBuffer('https://raw.githubusercontent.com/clarketm/proxy-list/master/proxy-list-raw.txt', 15000);
+        list = buf.toString('utf-8').split(/\r?\n/).map(s => s.trim())
+          .filter(s => /^\d{1,3}(\.\d{1,3}){3}:\d{2,5}$/.test(s));
+      } catch (_) {}
+      // shuffle then sample
+      for (let i = list.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [list[i], list[j]] = [list[j], list[i]]; }
+      const sample = list.slice(0, Math.min(limit * 3, list.length));
+      const results = [];
+      let cursor = 0;
+      const workers = Math.min(6, sample.length);
+      await Promise.all(Array.from({ length: workers }, async () => {
+        while (cursor < sample.length && results.length < limit) {
+          const idx = cursor++;
+          const [host, port] = sample[idx].split(':');
+          const pr = await probeProxy(host, parseInt(port, 10), timeout);
+          if (pr) results.push({ host, port: +port, ms: pr.ms });
+        }
+      }));
+      results.sort((a, b) => a.ms - b.ms);
+      return sendJSON(res, 200, { total: list.length, proxies: results.slice(0, limit) });
     }
 
     // Pluto HLS proxy: short local URLs that relay the long stitcher feed.
@@ -1389,9 +1437,9 @@ const server = http.createServer(async (req, res) => {
     if (p === '/streammp4' && req.method === 'POST') {
       if (req.headers['content-type']?.split(';')[0].trim() !== 'application/json')
         throw Object.assign(new Error('content-type must be application/json'), { status: 415 });
-      const { url, buffer, tc } = parseJSON(await readBody(req));
+      const { url, buffer, tc, proxy } = parseJSON(await readBody(req));
       if (typeof url !== 'string' || !url.trim()) throw Object.assign(new Error('url is required'), { status: 400 });
-      const r = await startMp4WithRetry(url, { bufferMs: (Number(buffer) || 30) * 1000, tc: !!tc });
+      const r = await startMp4WithRetry(url, { bufferMs: (Number(buffer) || 30) * 1000, tc: !!tc, proxy: proxy || '' });
       return sendJSON(res, 200, r);
     }
 
