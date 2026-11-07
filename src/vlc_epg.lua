@@ -998,6 +998,11 @@ local function self_extension_dir()
   return nil
 end
 
+local function has_node()
+  local cmd = is_windows() and 'where node >nul 2>nul' or 'command -v node >/dev/null 2>&1'
+  return os.execute(cmd)
+end
+
 local function launch_web()
   -- Resolve the web UI server.js: an explicit web_dir wins, then the
   -- self-contained distribution layout (web/ next to this extension), then
@@ -1022,10 +1027,23 @@ local function launch_web()
   dir = native_path(dir)
 
   if not web_running() then
+    if not has_node() then
+      return false, "Node.js is not installed - install it from https://nodejs.org (required for the web TV-guide)"
+    end
     if is_windows() then
       run_shell('start "" /D "' .. dir .. '" cmd /c "node server.js"')
     else
       run_shell('cd "' .. dir .. '" && nohup node server.js >/dev/null 2>&1 &')
+    end
+    -- wait up to ~8s for the server to listen before opening the browser
+    local deadline = os.clock() + 8
+    while os.clock() < deadline do
+      if web_running() then break end
+      local t = os.clock()
+      while os.clock() - t < 0.25 do end
+    end
+    if not web_running() then
+      return false, "Web server did not start after launch (is Node.js installed?). Open " .. WEB_URL .. "/ manually."
     end
   end
 

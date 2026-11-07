@@ -6,10 +6,10 @@ search, in-browser player) in your browser.
 
 ## What you need
 
-| Requirement | Notes |
-|---|---|
-| **VLC 3.0.x** | free from videolan.org — the *3.0.x* line (not 4.x) |
-| **Node.js** | free from nodejs.org — version 16 or newer, for the web TV-guide |
+| Requirement   | Notes                                                            |
+|---------------|------------------------------------------------------------------|
+| **VLC 3.0.x** | free from videolan.org — the *3.0.x* line (not 4.x)              |
+| **Node.js**   | free from nodejs.org — version 16 or newer, for the web TV-guide |
 
 > The Lua part (playlist columns) works without Node. Only the **web TV-guide**
 > needs Node.js.
@@ -84,12 +84,12 @@ Refresh the browser after editing.
 
 ## Troubleshooting
 
-| Symptom | Fix |
-|---|---|
-| "Web UI not found" in VLC | Make sure the `web/` folder is right next to `vlc_epg.lua` in the extensions folder |
-| Nothing opens in the browser | Verify Node.js and open http://127.0.0.1:8123/ manually |
-| Menu item missing | The `.lua` must be directly in `extensions/` (not in a subfolder) — check the path |
-| Port already in use (8123) | Something else uses that port; stop it or run the web server manually from `web/` (`node server.js`) |
+| Symptom                      | Fix                                                                                                  |
+|------------------------------|------------------------------------------------------------------------------------------------------|
+| "Web UI not found" in VLC    | Make sure the `web/` folder is right next to `vlc_epg.lua` in the extensions folder                  |
+| Nothing opens in the browser | Verify Node.js and open http://127.0.0.1:8123/ manually                                              |
+| Menu item missing            | The `.lua` must be directly in `extensions/` (not in a subfolder) — check the path                   |
+| Port already in use (8123)   | Something else uses that port; stop it or run the web server manually from `web/` (`node server.js`) |
 
 ## License
 
