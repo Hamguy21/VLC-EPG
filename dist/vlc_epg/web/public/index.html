@@ -1279,6 +1279,7 @@ function openGrid() {
   state._gridSlots = [];
   state._gridSeq = 0;
   state._gridArmed = null;
+  state._gridZap = '';
   $('gridCells').innerHTML = '';
   gv.style.display = 'flex';
   $('gridSearch').value = ''; hideGridList();
@@ -1288,21 +1289,47 @@ function openGrid() {
 function closeGrid() {
   const gv = $('gridView'); if (gv) gv.style.display = 'none';
   hideGridList();
-  (state._gridSlots || []).slice().forEach((s, i) => removeSlot(i, true));
+  for (let i = (state._gridSlots || []).length - 1; i >= 0; i--) removeSlot(i);
   state._gridSlots = []; state._gridArmed = null;
 }
 function relayout() {
   const n = (state._gridSlots || []).length;
-  const wrap = $('gridCells');
-  wrap.className = 'grid-cells' + (n > 1 ? ' g' + n : '');
+  $('gridCells').className = 'grid-cells' + (n > 1 ? ' g' + n : '');
+}
+function bindCellControls(cell, vid) {
+  const playBtn = cell.querySelector('.gplay'), seek = cell.querySelector('.gseek'),
+        timeEl = cell.querySelector('.gtime'), mute = cell.querySelector('.gmute'), vol = cell.querySelector('.gvol');
+  const fmt = s => { s = Math.floor(s || 0); const m = Math.floor(s / 60); return m + ':' + String(s % 60).padStart(2, '0'); };
+  const upd = () => {
+    const d = vid.duration || 0;
+    if (d) seek.value = Math.round((vid.currentTime / d) * 1000);
+    timeEl.textContent = fmt(vid.currentTime) + ' / ' + fmt(d);
+    playBtn.textContent = vid.paused ? '▶' : '⏸';
+    vol.value = Math.round((vid.muted ? 0 : vid.volume) * 100);
+    mute.textContent = (vid.muted || vid.volume === 0) ? '🔇' : '🔊';
+  };
+  vid.addEventListener('timeupdate', upd); vid.addEventListener('play', upd); vid.addEventListener('pause', upd);
+  vid.addEventListener('loadedmetadata', upd); vid.addEventListener('volumechange', upd);
+  playBtn.addEventListener('click', () => { if (vid.paused) vid.play().catch(() => {}); else vid.pause(); });
+  seek.addEventListener('input', () => { const d = vid.duration || 0; if (d) vid.currentTime = (seek.value / 1000) * d; });
+  mute.addEventListener('click', () => { vid.muted = !(vid.muted || vid.volume === 0); if (!vid.muted && vid.volume === 0) vid.volume = 1; upd(); });
+  vol.addEventListener('input', () => { vid.volume = (+vol.value) / 100; vid.muted = vol.value === '0'; upd(); });
 }
 function makeCell() {
   const cell = document.createElement('div');
   cell.className = 'gcell';
   cell.innerHTML = '<video autoplay playsinline></video>' +
+    '<div class="gloading"><div class="spin"></div></div>' +
     '<div class="glabel"></div>' +
     '<button class="gclose" title="Stop / close">✕</button>' +
-    '<div class="gadd">＋ Choose channel</div>';
+    '<div class="gadd">＋ Choose channel</div>' +
+    '<div class="gcontrols">' +
+      '<button class="gbtn gplay">▶</button>' +
+      '<span class="gtime">0:00 / 0:00</span>' +
+      '<input type="range" class="gseek" min="0" max="1000" value="0">' +
+      '<button class="gbtn gmute">🔊</button>' +
+      '<input type="range" class="gvol" min="0" max="100" value="100">' +
+    '</div>';
   cell.querySelector('.gclose').addEventListener('click', e => {
     e.stopPropagation();
     const idx = state._gridSlots.findIndex(s => s.el === cell);
@@ -1313,6 +1340,7 @@ function makeCell() {
     const idx = state._gridSlots.findIndex(s => s.el === cell);
     if (idx >= 0) armGridCell(idx);
   });
+  bindCellControls(cell, cell.querySelector('video'));
   return cell;
 }
 function addSlot() {
@@ -1322,9 +1350,9 @@ function addSlot() {
   $('gridCells').appendChild(el);
   relayout();
 }
-function removeSlot(idx, silent) {
+function removeSlot(idx) {
   const s = state._gridSlots[idx]; if (!s) return;
-  if (s.url) post('/stop', { id: s.id }).catch(() => {});
+  if (s.id) post('/stop', { id: s.id }).catch(() => {});
   s.el.remove();
   state._gridSlots.splice(idx, 1);
   state._gridArmed = null;
@@ -1333,15 +1361,17 @@ function removeSlot(idx, silent) {
 function syncGridCell(idx) {
   const s = state._gridSlots[idx]; if (!s) return;
   const vid = s.el.querySelector('video'), label = s.el.querySelector('.glabel'),
-        closeBtn = s.el.querySelector('.gclose'), add = s.el.querySelector('.gadd');
+        closeBtn = s.el.querySelector('.gclose'), add = s.el.querySelector('.gadd'),
+        loading = s.el.querySelector('.gloading'), controls = s.el.querySelector('.gcontrols');
   s.el.classList.toggle('playing', !!s.url);
   s.el.classList.toggle('armed', state._gridArmed === idx);
+  loading.style.display = (s.ch && !s.url) ? 'flex' : 'none';
   if (s.url) {
     label.textContent = s.ch.name;
-    label.style.display = ''; closeBtn.style.display = ''; add.style.display = 'none';
+    label.style.display = ''; closeBtn.style.display = ''; add.style.display = 'none'; controls.style.display = 'flex';
     if (vid.src !== s.url) { vid.src = s.url; vid.onloadedmetadata = () => vid.play().catch(() => {}); }
   } else {
-    label.style.display = 'none'; closeBtn.style.display = 'none'; add.style.display = 'flex';
+    label.style.display = 'none'; closeBtn.style.display = 'none'; add.style.display = 'flex'; controls.style.display = 'none';
     vid.removeAttribute('src'); vid.load();
   }
 }
@@ -1355,6 +1385,7 @@ function startGridCell(idx, ch) {
   const s = state._gridSlots[idx]; if (!s) return;
   s.ch = ch; s.url = null;
   if (!s.id) s.id = 'grid' + (++state._gridSeq);
+  syncGridCell(idx); // show spinner while loading
   post('/streammp4', { url: ch.url, buffer: state.webBuffer, scale: 'auto', id: s.id })
     .then(r => { if (state._gridSlots[idx] === s && s.ch === ch) { s.url = r.url; syncGridCell(idx); } })
     .catch(e => { s.ch = null; syncGridCell(idx); toast('Grid player ' + (idx+1) + ' failed: ' + e.message, true); });
@@ -1387,6 +1418,25 @@ function showGridList(q) {
   list.style.display = 'block';
 }
 function hideGridList() { const l = $('gridChList'); if (l) l.style.display = 'none'; }
+function gridZapKey(e) {
+  if ($('gridView').style.display !== 'flex') return;
+  const t = e.target; if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA')) return;
+  if (/^[0-9]$/.test(e.key)) {
+    e.preventDefault();
+    state._gridZap = ((state._gridZap || '') + e.key).slice(0, 3);
+    clearTimeout(state._gridZapT);
+    state._gridZapT = setTimeout(gridZapCommit, 1500);
+  } else if (e.key === 'Enter') {
+    if (state._gridZap) { e.preventDefault(); gridZapCommit(); }
+  }
+}
+function gridZapCommit() {
+  const n = parseInt(state._gridZap || '', 10);
+  state._gridZap = ''; clearTimeout(state._gridZapT);
+  if (!(n >= 1 && n <= state.view.length)) return;
+  const ch = state.view[n - 1];
+  if (ch && ch.url) assignGridChannel(ch);
+}
 $('gridBtn').addEventListener('click', openGrid);
 $('gridClose').addEventListener('click', closeGrid);
 $('gridAdd').addEventListener('click', addSlot);
@@ -1400,6 +1450,7 @@ $('gridSearch').addEventListener('keydown', e => {
 $('gridView').addEventListener('click', e => {
   if (e.target === $('gridView')) hideGridList();
 });
+document.addEventListener('keydown', gridZapKey);
 
 /* ---------- play + details ---------- */
 let hlsPlayer = null;
@@ -2556,6 +2607,7 @@ function selectAt(idx) {
 }
 function selChannel() { return state.sel != null ? state.view[state.sel] : null; }
 window.addEventListener('keydown', (e) => {
+if ($('gridView') && $('gridView').style.display === 'flex') return;
 if (e.key === 'Escape') {
   if ($('overlay').classList.contains('open')) { closeSettings(); return; }
   if ($('details').classList.contains('open')) { closeDetails(); return; }
