@@ -258,6 +258,7 @@
   </div>
   <video id="mpVideo" autoplay playsinline></video>
   <div class="mp-resize" id="mpResize" title="Drag to resize"></div>
+  <div class="mp-resize-left" id="mpResizeLeft" title="Drag to resize from left"></div>
 </div>
 
 <!-- Web player overlay -->
@@ -1429,6 +1430,30 @@ function initMiniInteractions() {
   const stopResize = () => { resizing = false; };
   rz.addEventListener('pointerup', stopResize);
   rz.addEventListener('pointercancel', stopResize);
+  // left-edge resize (grows/shrinks width from the left side)
+  const lz = $('mpResizeLeft');
+  let lResizing = false, lsx = 0, lox = 0, lrw = 0;
+  lz.addEventListener('pointerdown', e => {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    toLeftTop(); lResizing = true;
+    lsx = e.clientX; lox = parseFloat(box.style.left) || 0; lrw = box.offsetWidth;
+    try { lz.setPointerCapture(e.pointerId); } catch (_) {}
+  });
+  lz.addEventListener('pointermove', e => {
+    if (!lResizing) return;
+    const dx = e.clientX - lsx;
+    let left = lox + dx;
+    let w = lrw - dx;
+    if (w < 240) { left = lox + (lrw - 240); w = 240; }
+    if (left < 0) { w += left; left = 0; }
+    if (left + w > window.innerWidth) w = window.innerWidth - left;
+    if (w < 240) w = 240;
+    box.style.left = left + 'px'; box.style.width = w + 'px';
+  });
+  const stopLResize = () => { lResizing = false; };
+  lz.addEventListener('pointerup', stopLResize);
+  lz.addEventListener('pointercancel', stopLResize);
 }
 initMiniInteractions();
 function applyWebFs(on) {

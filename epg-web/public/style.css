@@ -318,9 +318,13 @@
   .mini-player video { position:absolute; left:0; top:34px; width:100%;
     height:calc(100% - 34px); background:#000; object-fit:cover; }
   .mini-player .mp-resize { position:absolute; right:0; bottom:0; width:16px; height:16px;
-    cursor:nwse-resize; z-index:2; }
+    cursor:nwse-resize; z-index:2; opacity:0; transition:opacity .12s; }
   .mini-player .mp-resize::after { content:''; position:absolute; right:3px; bottom:3px;
     width:8px; height:8px; border-right:2px solid var(--muted); border-bottom:2px solid var(--muted); }
+  .mini-player .mp-resize-left { position:absolute; left:0; top:34px; bottom:0; width:10px;
+    cursor:ew-resize; z-index:2; opacity:0; transition:opacity .12s; }
+  .mini-player:hover .mp-resize, .mini-player:hover .mp-resize-left,
+  .mini-player .mp-resize:hover, .mini-player .mp-resize-left:hover { opacity:1; }
 
   @media (max-width:900px) {
     html,body { overflow:hidden; }
