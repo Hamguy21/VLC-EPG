@@ -1805,7 +1805,7 @@ function showDetails(ch, p) {
   $('dWeb').onclick = () => { if (state.player === 'web') playChannel(ch); else playWeb(ch); };
   refreshPlayerButtons();
   openDetails();
-  if (state.translate && !progHasPreferredLang(p)) localizeDrawer(title, desc);
+  if (state.translate) localizeDrawer(title, desc);
 }
 
 // Clicking a channel opens the bottom drawer: channel info, now program, upcoming list.
@@ -1842,7 +1842,7 @@ function showChannelDetails(ch) {
   $('dWeb').onclick = () => { if (state.player === 'web') playChannel(ch); else playWeb(ch); };
   refreshPlayerButtons();
   openDetails();
-  if (state.translate && np && !progHasPreferredLang(np)) localizeDrawer(nowTitle, nowDesc);
+  if (state.translate && np) localizeDrawer(nowTitle, nowDesc);
 }
 // Translate the drawer title/description into the preferred language (async).
 async function localizeDrawer(title, desc) {
