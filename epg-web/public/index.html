@@ -1013,6 +1013,7 @@ $('h12Mode').addEventListener('change', e => {
   state.h12 = e.target.checked;
   storageSet(LS_H12, state.h12 ? '1' : '0');
   if (state.channels.length) render();
+  refreshOpenDetails();
   toast('12-hour clock ' + (state.h12 ? 'on' : 'off'));
 });
 $('advMode').addEventListener('change', e => {
@@ -1113,6 +1114,7 @@ $('fmtOpts').addEventListener('change', e => {
   document.querySelectorAll('.fmt-opt input[name="dfmt"]').forEach(r =>
     r.closest('.fmt-opt').classList.toggle('sel', r.checked));
   if (state.channels.length) render();
+  refreshOpenDetails();
   toast('Date format: ' + e.target.value.replace('DMY','D/M/Y').replace('YMD','Y/M/D').replace('MDY','M/D/Y'));
 });
 // Delete the selected source(s)
@@ -1971,6 +1973,12 @@ function openDetails() {
   const g = stage.querySelector('.grid');
   if (g) g.style.marginBottom = ($('details').offsetHeight + 40) + 'px';
 }
+// Re-fill the drawer if it's open (used when date/time format changes).
+function refreshOpenDetails() {
+  if ($('details').classList.contains('open') && state._drw) {
+    showDetails(state._drw.ch, state._drw.p);
+  }
+}
 function closeDetails() {
   $('details').classList.remove('open');
   $('details').setAttribute('aria-hidden', 'true');
@@ -2033,6 +2041,7 @@ function setDrawerIcon(url) {
 }
 
 function showDetails(ch, p) {
+  state._drw = { ch, p };
   const title = progTitle(p) || p.title || ch.name;
   const desc = progDesc(p) || p.desc || 'No synopsis available.';
   $('dTitle').textContent = title;
