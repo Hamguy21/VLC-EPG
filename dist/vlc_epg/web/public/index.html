@@ -1404,7 +1404,7 @@ function assignGridChannel(ch) {
 function showGridList(q) {
   const list = $('gridChList'); if (!list) return;
   const query = (q || '').trim().toLowerCase();
-  const matches = state.view.filter(c => c.url && (!query || c.name.toLowerCase().includes(query))).slice(0, 200);
+  const matches = state.channels.filter(c => c.url && (!query || c.name.toLowerCase().includes(query))).slice(0, 200);
   list.innerHTML = '<div class="gcl-head">Choose a channel' + (state._gridArmed != null ? ' — player ' + (state._gridArmed+1) : '') + '</div>' +
     (matches.length
       ? matches.map(c => `<div class="gcl-item" data-n="${escapeHtml(c.name)}"><span class="gcl-name">${escapeHtml(c.name)}</span>${c.group ? `<span class="gcl-group">${escapeHtml(c.group)}</span>` : ''}</div>`).join('')
@@ -1433,8 +1433,8 @@ function gridZapKey(e) {
 function gridZapCommit() {
   const n = parseInt(state._gridZap || '', 10);
   state._gridZap = ''; clearTimeout(state._gridZapT);
-  if (!(n >= 1 && n <= state.view.length)) return;
-  const ch = state.view[n - 1];
+  if (!(n >= 1 && n <= state.channels.length)) return;
+  const ch = state.channels[n - 1];
   if (ch && ch.url) assignGridChannel(ch);
 }
 $('gridBtn').addEventListener('click', openGrid);
