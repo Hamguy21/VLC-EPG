@@ -1,5 +1,10 @@
 # VLC EPG (IPTV)
 
+![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)
+![VLC](https://img.shields.io/badge/VLC-3.0.x-009c3f.svg)
+![Node.js ≥ 16](https://img.shields.io/badge/Node.js-%3E%3D16-00a000.svg)
+![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)
+
 A single-file [VLC](https://www.videolan.org/vlc/) 3.0.x Lua extension that loads
 an IPTV **M3U playlist** and an **XMLTV EPG guide**, then fills VLC's playlist
 columns with program information and shows a "now/next" on-screen popup when you
