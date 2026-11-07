@@ -447,7 +447,8 @@
     background:rgba(0,0,0,.55); z-index:3; }
   .gridview .gcell .gcontrols { position:absolute; left:0; right:0; bottom:0; z-index:4;
     display:flex; align-items:center; gap:8px; padding:7px 10px;
-    background:linear-gradient(transparent, rgba(0,0,0,.8)); }
+    background:linear-gradient(transparent, rgba(0,0,0,.8)); opacity:0; transition:opacity .15s; }
+  .gridview .gcell:hover .gcontrols { opacity:1; }
   .gridview .gcell .gbtn { background:transparent; border:none; color:#fff; font-size:13px;
     cursor:pointer; padding:0; line-height:1; min-width:16px; }
   .gridview .gcell .gtime { font-size:11px; color:#dde; white-space:nowrap; }
