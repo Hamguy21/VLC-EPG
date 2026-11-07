@@ -1438,8 +1438,13 @@ function miniShowErr(inst, msg) {
   if (el) { el.textContent = '⚠ ' + (msg || 'Cannot play this channel'); el.style.display = 'flex'; }
 }
 function wireMiniClose(inst) {
-  inst.el.querySelector('.mp-close').addEventListener('click', () => closeMini(inst));
-  inst.el.querySelector('.mp-expand').addEventListener('click', () => {
+  const closeBtn = inst.el.querySelector('.mp-close');
+  const expandBtn = inst.el.querySelector('.mp-expand');
+  const stop = e => e.stopPropagation(); // keep drag handler from grabbing button presses
+  closeBtn.addEventListener('pointerdown', stop);
+  expandBtn.addEventListener('pointerdown', stop);
+  closeBtn.addEventListener('click', () => closeMini(inst));
+  expandBtn.addEventListener('click', () => {
     const ch = inst.ch, src = inst.vid.src;
     closeMiniKeepRelay(inst);
     if (src) showWebWithSrc(ch, src); else playFor(ch);
@@ -1495,7 +1500,11 @@ function wireMiniInteractions(inst) {
   const rz = box.querySelector('.mp-resize'), bl = box.querySelector('.mp-resize-bl'), tl = box.querySelector('.mp-resize-tl');
   const toLeftTop = () => { const r = box.getBoundingClientRect(); box.style.left = r.left + 'px'; box.style.top = r.top + 'px'; box.style.right = 'auto'; box.style.bottom = 'auto'; };
   let dragging = false, sx = 0, sy = 0, ox = 0, oy = 0;
-  head.addEventListener('pointerdown', e => { if (e.button !== 0) return; toLeftTop(); dragging = true; sx = e.clientX; sy = e.clientY; ox = parseFloat(box.style.left) || 0; oy = parseFloat(box.style.top) || 0; try { head.setPointerCapture(e.pointerId); } catch (_) {} });
+  head.addEventListener('pointerdown', e => {
+    if (e.button !== 0) return;
+    if (e.target.closest && e.target.closest('.mp-close,.mp-expand')) return; // never start a drag from buttons
+    toLeftTop(); dragging = true; sx = e.clientX; sy = e.clientY; ox = parseFloat(box.style.left) || 0; oy = parseFloat(box.style.top) || 0; try { head.setPointerCapture(e.pointerId); } catch (_) {}
+  });
   head.addEventListener('pointermove', e => { if (!dragging) return; const x = Math.max(0, Math.min(ox + (e.clientX - sx), window.innerWidth - box.offsetWidth)); const y = Math.max(0, Math.min(oy + (e.clientY - sy), window.innerHeight - box.offsetHeight)); box.style.left = x + 'px'; box.style.top = y + 'px'; });
   const stopDrag = () => { dragging = false; };
   head.addEventListener('pointerup', stopDrag); head.addEventListener('pointercancel', stopDrag);
