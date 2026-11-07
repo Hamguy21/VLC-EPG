@@ -12,10 +12,24 @@ const M3U = process.env.M3U || path.join(__dirname, '..', 'examples', 'test.m3u'
 const EPG = process.env.EPG || path.join(__dirname, '..', 'examples', 'test_epg.xml');
 const OUT = process.env.OUT || path.join(__dirname, '..', 'docs', 'epg-web-preview.png');
 
+const findBrowser = () => {
+  if (process.env.BROWSER) return process.env.BROWSER;
+  const cands = process.platform === 'win32'
+    ? ['C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
+       'C:/Program Files/Microsoft/Edge/Application/msedge.exe',
+       'C:/Program Files/Google/Chrome/Application/chrome.exe',
+       'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe']
+    : process.platform === 'darwin'
+      ? ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+         '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge']
+      : ['/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/microsoft-edge'];
+  for (const c of cands) { try { if (fs.existsSync(c)) return c; } catch (_) {} }
+  return undefined;
+};
+
 (async () => {
   const browser = await puppeteer.launch({
-    executablePath: process.env.BROWSER ||
-      'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
+    executablePath: findBrowser(),
     headless: 'new',
     args: ['--no-sandbox', '--disable-gpu']
   });

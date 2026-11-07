@@ -1,4 +1,4 @@
-#EXTM3U url-tvg="file:///I:/AI/vlc-epg/examples/test_epg.xml"
+#EXTM3U url-tvg="test_epg.xml"
 #EXTINF:-1 tvg-id="CNN.us@SD" tvg-name="CNN" group-title="News",CNN
 https://stream.example/cnn.m3u8
 #EXTINF:-1 tvg-id="BBC.uk@HD" tvg-name="BBC One HD" group-title="General",BBC One HD
