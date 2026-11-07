@@ -1400,7 +1400,7 @@ async function openMiniPlayer(ch) {
 function stopVideoEl(vid) { try { if (!vid) return; vid.pause(); vid.removeAttribute('src'); vid.load(); } catch (_) {} }
 
 const MINI_TPL = `
-  <div class="mp-head"><span class="mp-title"></span><div class="mp-head-btns"><button class="mp-close mp-fav" title="Add to favorites">☆</button><button class="mp-close mp-expand" title="Open in full player">⛶</button><button class="mp-close" title="Close preview">✕</button></div></div>
+  <div class="mp-head"><span class="mp-title"></span><div class="mp-head-btns"><button class="mp-close mp-fav" title="Add to favorites">☆</button><button class="mp-close mp-expand" title="Open in full player">⛶</button><button class="mp-close mp-x" title="Close preview">✕</button></div></div>
   <video autoplay playsinline></video>
   <div class="mp-err" style="display:none"></div>
   <div class="mp-controls">
@@ -1438,7 +1438,7 @@ function miniShowErr(inst, msg) {
   if (el) { el.textContent = '⚠ ' + (msg || 'Cannot play this channel'); el.style.display = 'flex'; }
 }
 function wireMiniClose(inst) {
-  const closeBtn = inst.el.querySelector('.mp-close');
+  const closeBtn = inst.el.querySelector('.mp-x');
   const expandBtn = inst.el.querySelector('.mp-expand');
   const favBtn = inst.el.querySelector('.mp-fav');
   const stop = e => e.stopPropagation(); // keep drag handler from grabbing button presses
@@ -1465,7 +1465,7 @@ function wireMiniClose(inst) {
 // Delegated close: guarantees any mini closes even if a per-instance listener
 // was lost (e.g. after an error overlay or a DOM hiccup).
 $('miniZone').addEventListener('click', e => {
-  const btn = e.target.closest('.mp-close'); if (!btn) return;
+  const btn = e.target.closest('.mp-x'); if (!btn) return;
   const box = btn.closest('.mini-player'); if (!box) return;
   const inst = state._minis.find(m => m.el === box);
   if (inst) closeMini(inst);
@@ -1516,7 +1516,7 @@ function wireMiniInteractions(inst) {
   let dragging = false, sx = 0, sy = 0, ox = 0, oy = 0;
   head.addEventListener('pointerdown', e => {
     if (e.button !== 0) return;
-    if (e.target.closest && e.target.closest('.mp-close,.mp-expand')) return; // never start a drag from buttons
+    if (e.target.closest && e.target.closest('.mp-x,.mp-expand,.mp-fav')) return; // never start a drag from buttons
     toLeftTop(); dragging = true; sx = e.clientX; sy = e.clientY; ox = parseFloat(box.style.left) || 0; oy = parseFloat(box.style.top) || 0; try { head.setPointerCapture(e.pointerId); } catch (_) {}
   });
   head.addEventListener('pointermove', e => { if (!dragging) return; const x = Math.max(0, Math.min(ox + (e.clientX - sx), window.innerWidth - box.offsetWidth)); const y = Math.max(0, Math.min(oy + (e.clientY - sy), window.innerHeight - box.offsetHeight)); box.style.left = x + 'px'; box.style.top = y + 'px'; });
