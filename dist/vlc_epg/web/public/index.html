@@ -1221,7 +1221,7 @@ function render() {
       const ch = channels[idx];
       if (!ch) return;
       selectAt(idx);
-      if (state.miniPlayer && ch.url) { openMiniPlayer(ch); }
+      if (state.miniPlayer && state.player === 'web' && ch.url) { openMiniPlayer(ch); }
       else showChannelDetails(ch);
     });
     el.addEventListener('dblclick', (e) => {
