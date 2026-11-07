@@ -210,6 +210,7 @@
   .wp-chlist .wcl-item.active { background:rgba(86,115,245,.3); }
   .wp-chlist .wcl-num { width:36px; flex:none; text-align:right; color:var(--accent2); font-weight:700;
     font:12px ui-monospace,Consolas,monospace; }
+  .wp-chlist .wcl-play { color:var(--accent); font-size:11px; flex:none; }
   .wp-chlist .wcl-name { flex:1; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
   .wp-loading { position:absolute; inset:44px 0 0; display:flex; align-items:center; justify-content:center;
     background:rgba(0,0,0,.45); z-index:4; pointer-events:none; }
@@ -1704,13 +1705,23 @@ function showChno(txt) {
 }
 function buildChList() {
   const box = $('wpChList');
+  let cur = -1;
+  if (state._cur) { const i = state.view.indexOf(state._cur); if (i >= 0) cur = i; }
+  else if (state.sel != null) cur = state.sel;
   box.innerHTML = state.view.map((ch, i) =>
-    `<div class="wcl-item ${i === state.sel ? 'active' : ''}" data-i="${i}">` +
+    `<div class="wcl-item ${i === cur ? 'active' : ''}" data-i="${i}">` +
     `<span class="wcl-num">${i + 1}</span>` +
+    (i === cur ? '<span class="wcl-play">▶</span>' : '') +
     `<span class="wcl-name">${escapeHtml(ch.name)}</span></div>`).join('')
     || '<div style="padding:14px;color:#8a94a8">no channels</div>';
+  return cur;
 }
-function openChList() { buildChList(); $('wpChList').classList.remove('hidden'); }
+function openChList() {
+  const cur = buildChList();
+  $('wpChList').classList.remove('hidden');
+  const items = document.querySelectorAll('#wpChList .wcl-item');
+  const el = items[Math.max(0, cur)]; if (el) el.scrollIntoView({ block: 'nearest' });
+}
 function closeChList() { $('wpChList').classList.add('hidden'); }
 function zapPlayer(delta) {
   if (!state.view.length) return;
