@@ -277,6 +277,7 @@
       <button class="wp-tool" id="wpPrev" title="Previous channel">◀</button>
       <button class="wp-tool" id="wpNext" title="Next channel">▶</button>
       <button class="wp-tool" id="wpListBtn" title="Channel list">▦</button>
+      <button class="wp-tool" id="wpMini" title="Open in mini player">⤵</button>
     </div>
     <button class="d-close" id="wpClose" title="Close">×</button>
   </div>
@@ -1198,6 +1199,16 @@ function render() {
     el.addEventListener('dblclick', (e) => {
       e.stopPropagation();
       const ch = channels[parseInt(el.dataset.idx, 10)];
+      if (!ch) return;
+      // seamless: if the mini player is already playing this channel, hand its
+      // stream off to the main player instead of relaunching
+      if (state._miniCh && state._miniCh.url === ch.url && $('miniPlayer').style.display !== 'none') {
+        const src = $('mpVideo').src;
+        hideMiniKeepRelay();
+        if (src) showWebWithSrc(ch, src); else playFor(ch);
+        dbgLog('mini_to_web', { ch: ch.name });
+        return;
+      }
       if (ch) playFor(ch);
     });
   });
@@ -1368,6 +1379,7 @@ function showPlayerErr(msg) {
 async function openMiniPlayer(ch) {
   const box = $('miniPlayer'); if (!box) return;
   const vid = $('mpVideo');
+  state._miniCh = ch;
   $('mpTitle').textContent = ch.name;
   box.style.display = 'block';
   post('/stop', {}).catch(() => {});
@@ -1386,8 +1398,41 @@ async function openMiniPlayer(ch) {
 $('mpClose').addEventListener('click', () => {
   post('/stop', {}).catch(() => {});
   const box = $('miniPlayer'), vid = $('mpVideo');
+  state._miniCh = null;
   box.style.display = 'none';
   vid.pause(); vid.removeAttribute('src'); vid.load();
+});
+
+// Seamless handoff helpers: swap the SAME relay stream between mini and main
+// players without restarting it (no /stop / relaunch).
+function stopVideoEl(vid) { try { if (!vid) return; vid.pause(); vid.removeAttribute('src'); vid.load(); } catch (_) {} }
+function showMiniWithSrc(ch, src) {
+  state._miniCh = ch;
+  $('miniPlayer').style.display = 'block';
+  $('mpTitle').textContent = ch ? ch.name : '';
+  const mv = $('mpVideo'); stopVideoEl(mv);
+  if (src) { mv.src = src; mv.onloadedmetadata = () => mv.play().catch(() => {}); }
+}
+function hideMiniKeepRelay() {
+  state._miniCh = null;
+  $('miniPlayer').style.display = 'none';
+  stopVideoEl($('mpVideo'));
+}
+function showWebWithSrc(ch, src) {
+  state._cur = ch || state._cur;
+  $('webplayer').style.display = 'flex';
+  showLoader(false);
+  const wv = $('wpVideo'); stopVideoEl(wv);
+  if (src) { wv.src = src; wv.onloadedmetadata = () => wv.play().catch(() => {}); }
+}
+$('wpMini').addEventListener('click', () => {
+  const src = $('wpVideo').src;
+  const ch = state._cur;
+  $('webplayer').style.display = 'none';   // hide main without stopping the relay
+  stopVideoEl($('wpVideo'));
+  if (src) showMiniWithSrc(ch, src);
+  else if (ch) openMiniPlayer(ch);
+  dbgLog('to_mini', { ch: ch && ch.name });
 });
 
 // Make the mini player draggable (via its header) and resizable (corner handle).
