@@ -1400,7 +1400,7 @@ async function openMiniPlayer(ch) {
 function stopVideoEl(vid) { try { if (!vid) return; vid.pause(); vid.removeAttribute('src'); vid.load(); } catch (_) {} }
 
 const MINI_TPL = `
-  <div class="mp-head"><span class="mp-title"></span><div class="mp-head-btns"><button class="mp-close mp-expand" title="Open in full player">⛶</button><button class="mp-close" title="Close preview">✕</button></div></div>
+  <div class="mp-head"><span class="mp-title"></span><div class="mp-head-btns"><button class="mp-close mp-fav" title="Add to favorites">☆</button><button class="mp-close mp-expand" title="Open in full player">⛶</button><button class="mp-close" title="Close preview">✕</button></div></div>
   <video autoplay playsinline></video>
   <div class="mp-err" style="display:none"></div>
   <div class="mp-controls">
@@ -1424,7 +1424,7 @@ function makeMini(ch, id) {
   const L = Math.max(8, window.innerWidth - w - 16 - off);
   const T = Math.max(8, window.innerHeight - h - 16 - off);
   Object.assign(wrap.style, { left: L + 'px', top: T + 'px', width: w + 'px', height: h + 'px', right: 'auto', bottom: 'auto' });
-  $('miniZone').appendChild(wrap);
+  const zone = $('miniZone'); if (zone) zone.appendChild(wrap);
   const inst = { id: id || ('mini' + (++state._miniSeq)), el: wrap, vid: wrap.querySelector('video'), ch, ch_url: ch.url, src: null, destroyed: false };
   wrap.querySelector('.mp-title').textContent = ch.name;
   wireMiniControls(inst);
@@ -1440,9 +1440,20 @@ function miniShowErr(inst, msg) {
 function wireMiniClose(inst) {
   const closeBtn = inst.el.querySelector('.mp-close');
   const expandBtn = inst.el.querySelector('.mp-expand');
+  const favBtn = inst.el.querySelector('.mp-fav');
   const stop = e => e.stopPropagation(); // keep drag handler from grabbing button presses
   closeBtn.addEventListener('pointerdown', stop);
   expandBtn.addEventListener('pointerdown', stop);
+  favBtn.addEventListener('pointerdown', stop);
+  const favKey2 = () => favKey(inst.ch);
+  const updFav = () => { const on = state.fav.has(favKey2()); favBtn.textContent = on ? '★' : '☆'; favBtn.classList.toggle('on', on); };
+  updFav();
+  favBtn.addEventListener('click', () => {
+    const k = favKey2();
+    if (state.fav.has(k)) state.fav.delete(k); else state.fav.add(k);
+    saveFav(); updFav();
+    toast(state.fav.has(k) ? '★ Added to favorites' : 'Removed from favorites');
+  });
   closeBtn.addEventListener('click', () => closeMini(inst));
   expandBtn.addEventListener('click', () => {
     const ch = inst.ch, src = inst.vid.src;
@@ -1472,7 +1483,7 @@ function closeMiniKeepRelay(inst) {
   inst.el.remove();
   const i = state._minis.indexOf(inst); if (i >= 0) state._minis.splice(i, 1);
 }
-function bringMiniFront(inst) { if (inst && inst.el) inst.el.parentNode.appendChild(inst.el); }
+function bringMiniFront(inst) { if (inst && inst.el && inst.el.parentNode) inst.el.parentNode.appendChild(inst.el); }
 
 function wireMiniControls(inst) {
   const vid = inst.vid;
@@ -1498,8 +1509,9 @@ function wireMiniControls(inst) {
 function wireMiniInteractions(inst) {
   const box = inst.el, head = box.querySelector('.mp-head');
   const rz = box.querySelector('.mp-resize'), bl = box.querySelector('.mp-resize-bl'), tl = box.querySelector('.mp-resize-tl');
-  // interacting with a mini raises it above the others (front = last child)
-  box.addEventListener('pointerdown', () => bringMiniFront(inst));
+  // interacting with a mini raises it above the others (front = last child);
+  // on click (not pointerdown) so re-parenting never interrupts an active drag
+  box.addEventListener('click', () => bringMiniFront(inst));
   const toLeftTop = () => { const r = box.getBoundingClientRect(); box.style.left = r.left + 'px'; box.style.top = r.top + 'px'; box.style.right = 'auto'; box.style.bottom = 'auto'; };
   let dragging = false, sx = 0, sy = 0, ox = 0, oy = 0;
   head.addEventListener('pointerdown', e => {

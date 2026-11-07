@@ -324,6 +324,8 @@
     font-size:14px; cursor:pointer; line-height:1; padding:2px 4px; }
   .mini-player .mp-head-btns { display:flex; align-items:center; gap:8px; }
   .mini-player .mp-expand { font-size:15px; }
+  .mini-player .mp-fav { font-size:15px; }
+  .mini-player .mp-fav.on { color:#ffd700; }
   .mini-player .mp-close:hover { color:var(--text); }
   .mini-player video { position:absolute; left:0; top:34px; width:100%;
     height:calc(100% - 34px); background:#000; object-fit:cover; }
