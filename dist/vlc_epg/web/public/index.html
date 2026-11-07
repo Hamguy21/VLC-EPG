@@ -20,6 +20,8 @@
     <button class="btn" id="load">Load guide</button>
     <button class="btn ghost" id="sample">Sample</button>
     <button class="btn ghost" id="grab" title="Auto-fetch matching EPG guides for these channels">⚡ Auto EPG</button>
+    <span class="grp">Countries:</span>
+    <input type="text" id="grabCountries" placeholder="auto" title="Optional: comma-separated country codes, e.g. US,GB,DE" style="width:90px">
     <button class="btn ghost" id="saveSrc" title="Save the current playlist/EPG as a named source">+ Save</button>
     <button class="btn ghost" id="settingsBtn" title="Settings" aria-label="Open settings">⚙ Settings</button>
     <div class="field"><label>Saved sources (Ctrl-click to select several)</label>
@@ -938,10 +940,12 @@ async function autoGrab() {
   const loadId = ++activeLoadId;
   const m3u = $('m3u').value.trim();
   if (!m3u) { toast('Enter an M3U playlist first', true); return; }
+  const raw = $('grabCountries').value.trim();
+  const countries = raw ? raw.split(/[,;]+/).map(s => s.trim()).filter(Boolean) : undefined;
   setStatus('Auto-grabbing EPG guides… (this may take a few seconds)');
   showLoading(true);
   try {
-    const j = await post('/grab', { m3u });
+    const j = await post('/grab', { m3u, ...(countries && countries.length ? { countries } : {}) });
     if (loadId !== activeLoadId) return;
     state.channels = j.channels.map((c, i) => ({ ...c, _src: i }));
     state.groups = j.groups;

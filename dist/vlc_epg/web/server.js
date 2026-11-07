@@ -1164,7 +1164,43 @@ const guideCache = new Map(); // code -> { ts, parsed }
 
 function resolveCountry(name) {
   const key = String(name || '').toLowerCase().trim();
-  return COUNTRY_MAP[key] || null;
+  if (COUNTRY_MAP[key]) return COUNTRY_MAP[key];
+  if (/^[a-z]{2}$/.test(key) && ISO_CODES.has(key.toUpperCase())) return key.toUpperCase();
+  return null;
+}
+
+// 2-letter tokens that are quality/format tags, not countries (avoid e.g.
+// "@SD" being read as Sudan).
+const QUALITY_STOP = new Set(['SD', 'HD', 'FHD', 'UHD', 'QHD', '4K', '8K']);
+const ISO_CODES = new Set(Object.values(COUNTRY_MAP));
+// Common tvg-id region tokens that aren't ISO alpha-2 but map to one.
+const COUNTRY_ALIAS = { UK: 'GB' };
+
+// Detect which country guides to fetch: from channel groups, and additionally
+// from channel tvg-id region tokens (e.g. "CNN.us@SD" -> US, "BBC.uk@HD" -> GB).
+function inferCountries(playlist) {
+  const set = new Set();
+  for (const g of (playlist.groupList || [])) {
+    const c = resolveCountry(g);
+    if (c) set.add(c);
+    else {
+      const low = String(g).toLowerCase();
+      for (const [k, v] of Object.entries(COUNTRY_MAP)) {
+        if (k.length > 3 && low.includes(k)) { set.add(v); break; }
+      }
+    }
+  }
+  for (const ch of (playlist.channels || [])) {
+    const id = String(ch.tvg_id || '');
+    for (const m of id.matchAll(/[.@]([A-Za-z]{2})/g)) {
+      const tok = m[1].toUpperCase();
+      const norm = COUNTRY_ALIAS[tok] || tok;
+      if (!ISO_CODES.has(norm)) continue;
+      if (m[0][0] === '@' && QUALITY_STOP.has(tok)) continue;
+      set.add(norm);
+    }
+  }
+  return [...set];
 }
 
 function groupCountries(groups) {
@@ -1213,7 +1249,7 @@ async function grabEPG(m3u, requestedCountries) {
     codes = requestedCountries.map(c => resolveCountry(c)).filter(Boolean);
     codes = [...new Set(codes)];
   } else {
-    codes = groupCountries(playlist.groupList);
+    codes = inferCountries(playlist);
   }
   if (!codes.length) {
     return {
