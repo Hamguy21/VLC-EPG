@@ -508,7 +508,12 @@ async function startMp4WithRetry(url, opts) {
   catch (e) {
     if (e && e.status === 422 && !opts._retried) {
       opts._retried = true;
-      sev('relay_startup_retry', {});
+      // Some streams carry MP2 (or other non-AAC) audio; the aac_adtstoasc
+      // bitstream filter only supports AAC, so drop it on the retry.
+      if (/aac_adtstoasc|not supported by the bitstream filter|\bmp2\b/i.test(String(e.message || ''))) {
+        opts.noBsf = true;
+      }
+      sev('relay_startup_retry', { noBsf: !!opts.noBsf });
       return startMp4Relay(url, opts);
     }
     throw e;
@@ -823,6 +828,8 @@ async function startMp4Relay(url, opts) {
     if (tc) {
       args.push('-map', '0:v:0', '-map', '0:a:0', '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28',
         '-c:a', 'aac', '-b:a', '128k');
+    } else if (opts.noBsf) {
+      args.push('-c', 'copy'); // non-AAC audio (e.g. MP2): aac_adtstoasc bsf unsupported
     } else {
       args.push('-c', 'copy', '-bsf:a', 'aac_adtstoasc'); // remux HLS AAC -> MP4
     }
