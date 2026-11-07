@@ -163,7 +163,7 @@
     </div>
     <div class="p-row">
       <label class="fmt-opt" style="display:inline-flex;gap:8px">
-        <input type="checkbox" id="miniPlayerMode"> Click a program opens a mini preview player
+        <input type="checkbox" id="miniPlayerMode"> Click a program opens a mini preview player <span class="p-hint">(web player only)</span>
       </label>
     </div>
     <div class="p-row">
@@ -1187,7 +1187,7 @@ function render() {
       const idx = parseInt(el.dataset.idx, 10);
       const ch = channels[idx];
       const full = (ch.programs || []).find(p => p.start === parseInt(el.dataset.start,10) && p.stop === parseInt(el.dataset.stop,10));
-      if (state.miniPlayer && ch && ch.url) { openMiniPlayer(ch); }
+      if (state.miniPlayer && state.player === 'web' && ch && ch.url) { openMiniPlayer(ch); }
       else showDetails(ch, full || {
         title: el.dataset.tt, desc: el.dataset.desc, cat: el.dataset.cat,
         icon: el.dataset.icon || '', start: parseInt(el.dataset.start,10), stop: parseInt(el.dataset.stop,10)

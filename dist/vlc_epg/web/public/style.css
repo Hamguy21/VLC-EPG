@@ -407,3 +407,4 @@
   @media (prefers-reduced-motion:reduce) {
     *, *::before, *::after { animation-duration:.01ms !important; animation-iteration-count:1 !important; transition-duration:.01ms !important; scroll-behavior:auto !important; }
   }
+  .p-hint { font-size:11px; opacity:.6; font-weight:400; }
