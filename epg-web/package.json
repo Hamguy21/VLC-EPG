@@ -1,4 +1,14 @@
 {
+  "name": "vlc-epg-web",
+  "version": "1.0.0",
+  "description": "VLC EPG companion web UI: TV-guide grid + in-browser player (FFmpeg relay)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=16"
+  },
   "dependencies": {
     "puppeteer-core": "^23.11.1"
   }
