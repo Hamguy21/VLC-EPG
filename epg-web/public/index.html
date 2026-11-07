@@ -1692,6 +1692,10 @@ function channelNumber(ch) {
   const i = state.view.indexOf(ch);
   return i >= 0 ? i + 1 : (state.channels.indexOf(ch) + 1);
 }
+function dbgChanChange(ch, how) {
+  if (!ch) return;
+  dbgLog('channel_change', { ch: ch.name, how, num: channelNumber(ch) });
+}
 function showChno(txt) {
   if (!state.chno) return;
   const el = $('wpChno'); if (!el) return;
@@ -1730,14 +1734,14 @@ function zapPlayer(delta) {
   i = Math.min(Math.max(i + delta, 0), state.view.length - 1);
   selectAt(i);
   const c = state.view[i];
-  if (c) { playFor(c); showChno(channelNumber(c)); }
+  if (c) { playFor(c); showChno(channelNumber(c)); dbgChanChange(c, delta > 0 ? 'next' : 'prev'); }
 }
 function applyNumber() {
   const n = parseInt(npBuf, 10);
   npBuf = ''; clearTimeout(npTimer); npTimer = null;
   if (!n) return;
   const i = state.view.findIndex((_, k) => k + 1 === n);
-  if (i >= 0) { selectAt(i); playFor(state.view[i]); showChno(n); }
+  if (i >= 0) { selectAt(i); playFor(state.view[i]); showChno(n); dbgChanChange(state.view[i], 'number'); }
   else toast('No channel ' + n, true);
 }
 function handlePlayerKey(e) {
@@ -1761,7 +1765,7 @@ function handlePlayerKey(e) {
     if (listOpen) {
       const items = [...box.querySelectorAll('.wcl-item')];
       const a = items.findIndex(x => x.classList.contains('active'));
-      if (items[a]) { const c = state.view[+items[a].dataset.i]; if (c) { closeChList(); playFor(c); } }
+      if (items[a]) { const c = state.view[+items[a].dataset.i]; if (c) { closeChList(); playFor(c); dbgChanChange(c, 'list'); } }
       e.preventDefault();
     }
     return;
@@ -1791,7 +1795,7 @@ $('wpListBtn').addEventListener('click', () => {
 $('wpChList').addEventListener('mousedown', (e) => {
   const it = e.target.closest('.wcl-item'); if (!it) return;
   closeChList();
-  const c = state.view[+it.dataset.i]; if (c) playFor(c);
+  const c = state.view[+it.dataset.i]; if (c) { playFor(c); dbgChanChange(c, 'list'); }
 });
 $('wpClose').addEventListener('click', closeWeb);
 
@@ -1922,7 +1926,10 @@ async function openDbg() {
     const lbl = e.k || e.msg || '?';
     const rest = (e.codecs ? ' codecs=' + JSON.stringify(e.codecs) : '') +
       (e.msg && e.k ? ' msg=' + String(e.msg).slice(0, 120) : '') +
-      (e.code != null ? ' code=' + e.code : '');
+      (e.code != null ? ' code=' + e.code : '') +
+      (e.ch ? ' ch=' + e.ch : '') +
+      (e.how ? ' how=' + e.how : '') +
+      (e.num ? ' num=' + e.num : '');
     return new Date(e.t).toLocaleTimeString() + ' ' + lbl + rest;
   };
   const lines = [...dbg.events.map(fmt), ...srv.map(e => '[srv] ' + fmt(e))].slice(-90).join('\n');
@@ -2184,10 +2191,10 @@ switch (e.key) {
   case 'ArrowRight': e.preventDefault(); stage.scrollLeft += 140; break;
   case 'ArrowLeft':  e.preventDefault(); stage.scrollLeft -= 140; break;
   case 'Enter': {
-    const ch = selChannel(); if (ch) { e.preventDefault(); playFor(ch); } break;
+    const ch = selChannel(); if (ch) { e.preventDefault(); playFor(ch); dbgChanChange(ch, 'grid'); } break;
   }
   case ' ': {
-    const ch = selChannel(); if (ch) { e.preventDefault(); playFor(ch); } break;
+    const ch = selChannel(); if (ch) { e.preventDefault(); playFor(ch); dbgChanChange(ch, 'grid'); } break;
   }
 }
 });
