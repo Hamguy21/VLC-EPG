@@ -273,6 +273,7 @@
     <button class="btn ghost small" id="gridClose">✕ Close</button>
   </div>
   <div class="grid-cells" id="gridCells"></div>
+  <div class="gchlist" id="gridChList" style="display:none"></div>
 </div>
 <!-- Web player overlay -->
 <div class="webplayer" id="webplayer" style="display:none">
@@ -1291,11 +1292,12 @@ function openGrid() {
     wrap.appendChild(cell);
   }
   gv.style.display = 'flex';
-  $('gridSearch').value = ''; hideGridResults();
+  $('gridSearch').value = ''; hideGridList();
   $('gridSearch').focus();
 }
 function closeGrid() {
   const gv = $('gridView'); if (gv) gv.style.display = 'none';
+  hideGridList();
   for (let i = 0; i < 4; i++) stopGridCell(i);
   state._grid = []; state._gridCells = []; state._gridArmed = null;
 }
@@ -1319,7 +1321,25 @@ function armGridCell(i) {
   state._gridArmed = i;
   state._gridCells.forEach((c, k) => c.classList.toggle('armed', k === i));
   const s = $('gridSearch'); if (s) { s.focus(); s.placeholder = 'Pick a channel for square ' + (i+1) + '…'; }
+  showGridList('');
 }
+function showGridList(q) {
+  const list = $('gridChList'); if (!list) return;
+  const query = (q || '').trim().toLowerCase();
+  const matches = state.view.filter(c => c.url && (!query || c.name.toLowerCase().includes(query))).slice(0, 200);
+  list.innerHTML = '<div class="gcl-head">Choose a channel' + (state._gridArmed != null ? ' — square ' + (state._gridArmed+1) : '') + '</div>' +
+    (matches.length
+      ? matches.map(c => `<div class="gcl-item" data-n="${escapeHtml(c.name)}"><span class="gcl-name">${escapeHtml(c.name)}</span>${c.group ? `<span class="gcl-group">${escapeHtml(c.group)}</span>` : ''}</div>`).join('')
+      : '<div class="gcl-item" style="opacity:.6;cursor:default">No channels match</div>');
+  list.querySelectorAll('.gcl-item[data-n]').forEach(el => {
+    el.addEventListener('click', () => {
+      const ch = state.view.find(c => c.name === el.dataset.n && c.url);
+      if (ch) assignGridChannel(ch);
+    });
+  });
+  list.style.display = 'block';
+}
+function hideGridList() { const l = $('gridChList'); if (l) l.style.display = 'none'; }
 function startGridCell(i, ch) {
   state._grid[i] = { ch, url: null };
   post('/streammp4', { url: ch.url, buffer: state.webBuffer, scale: 'auto', id: 'grid' + i })
@@ -1332,38 +1352,27 @@ function stopGridCell(i) {
   if (g && g.url) post('/stop', { id: 'grid' + i }).catch(() => {});
   if (state._gridCells && state._gridCells[i]) syncGridCell(i);
 }
-function hideGridResults() { const r = $('gridResults'); if (r) r.innerHTML = ''; }
-$('gridBtn').addEventListener('click', openGrid);
-$('gridClose').addEventListener('click', closeGrid);
-$('gridSearch').addEventListener('input', () => {
-  const q = $('gridSearch').value.trim().toLowerCase();
-  const list = $('gridResults');
-  if (!q) { hideGridResults(); return; }
-  const matches = state.view.filter(c => c.url && c.name.toLowerCase().includes(q)).slice(0, 40);
-  list.innerHTML = matches.map(c => `<div class="jr" data-n="${escapeHtml(c.name)}">${escapeHtml(c.name)}</div>`).join('') || '<div class="jr-none">no matches</div>';
-  list.querySelectorAll('.jr').forEach(el => {
-    el.addEventListener('click', () => {
-      const name = el.dataset.n;
-      const ch = state.view.find(c => c.name === name && c.url);
-      if (ch) assignGridChannel(ch);
-    });
-  });
-});
-$('gridSearch').addEventListener('keydown', e => {
-  if (e.key === 'Enter') {
-    const first = $('gridResults').querySelector('.jr');
-    if (first) { const name = first.dataset.n; const ch = state.view.find(c => c.name === name && c.url); if (ch) assignGridChannel(ch); }
-  } else if (e.key === 'Escape') { hideGridResults(); }
-});
 function assignGridChannel(ch) {
   let target = state._gridArmed;
   if (target == null) { target = state._grid.findIndex(g => !g); }
   if (target < 0) { toast('All 4 grid squares are full', true); return; }
   state._gridArmed = null;
   state._gridCells.forEach(c => c.classList.remove('armed'));
-  $('gridSearch').value = ''; hideGridResults(); $('gridSearch').placeholder = 'Type to choose a channel…';
+  $('gridSearch').value = ''; hideGridList(); $('gridSearch').placeholder = 'Type to choose a channel…';
   startGridCell(target, ch);
 }
+$('gridBtn').addEventListener('click', openGrid);
+$('gridClose').addEventListener('click', closeGrid);
+$('gridSearch').addEventListener('input', () => { showGridList($('gridSearch').value); });
+$('gridSearch').addEventListener('keydown', e => {
+  if (e.key === 'Enter') {
+    const first = $('gridChList').querySelector('.gcl-item[data-n]');
+    if (first) { const ch = state.view.find(c => c.name === first.dataset.n && c.url); if (ch) assignGridChannel(ch); }
+  } else if (e.key === 'Escape') { hideGridList(); }
+});
+$('gridView').addEventListener('click', e => {
+  if (e.target === $('gridView') || e.target.closest('.grid-cells')) { if (!e.target.closest('.gcell')) hideGridList(); }
+});
 
 /* ---------- play + details ---------- */
 let hlsPlayer = null;
