@@ -258,7 +258,8 @@
   </div>
   <video id="mpVideo" autoplay playsinline></video>
   <div class="mp-resize" id="mpResize" title="Drag to resize"></div>
-  <div class="mp-resize-left" id="mpResizeLeft" title="Drag to resize from left"></div>
+  <div class="mp-resize-bl" id="mpResizeBL" title="Drag to resize"></div>
+  <div class="mp-resize-tl" id="mpResizeTL" title="Drag to resize"></div>
 </div>
 
 <!-- Web player overlay -->
@@ -1430,30 +1431,43 @@ function initMiniInteractions() {
   const stopResize = () => { resizing = false; };
   rz.addEventListener('pointerup', stopResize);
   rz.addEventListener('pointercancel', stopResize);
-  // left-edge resize (grows/shrinks width from the left side)
-  const lz = $('mpResizeLeft');
-  let lResizing = false, lsx = 0, lox = 0, lrw = 0;
-  lz.addEventListener('pointerdown', e => {
-    if (e.button !== 0) return;
-    e.stopPropagation();
-    toLeftTop(); lResizing = true;
-    lsx = e.clientX; lox = parseFloat(box.style.left) || 0; lrw = box.offsetWidth;
-    try { lz.setPointerCapture(e.pointerId); } catch (_) {}
-  });
-  lz.addEventListener('pointermove', e => {
-    if (!lResizing) return;
-    const dx = e.clientX - lsx;
-    let left = lox + dx;
-    let w = lrw - dx;
-    if (w < 240) { left = lox + (lrw - 240); w = 240; }
-    if (left < 0) { w += left; left = 0; }
-    if (left + w > window.innerWidth) w = window.innerWidth - left;
-    if (w < 240) w = 240;
-    box.style.left = left + 'px'; box.style.width = w + 'px';
-  });
-  const stopLResize = () => { lResizing = false; };
-  lz.addEventListener('pointerup', stopLResize);
-  lz.addEventListener('pointercancel', stopLResize);
+  // generic corner resize: mode 'tl' adjusts left/top/width/height; 'bl'
+  // adjusts left/width + height (bottom anchored); 'br' = corner (default)
+  const bindCorner = (handle, mode) => {
+    let a = false, sx = 0, sy = 0, ox = 0, oy = 0, ow = 0, oh = 0;
+    handle.addEventListener('pointerdown', e => {
+      if (e.button !== 0) return;
+      e.stopPropagation();
+      toLeftTop(); a = true;
+      sx = e.clientX; sy = e.clientY;
+      ox = parseFloat(box.style.left) || 0; oy = parseFloat(box.style.top) || 0;
+      ow = box.offsetWidth; oh = box.offsetHeight;
+      try { handle.setPointerCapture(e.pointerId); } catch (_) {}
+    });
+    handle.addEventListener('pointermove', e => {
+      if (!a) return;
+      const dx = e.clientX - sx, dy = e.clientY - sy;
+      let L = ox, T = oy, W = ow, H = oh;
+      if (mode === 'tl') { L = ox + dx; T = oy + dy; W = ow - dx; H = oh - dy; }
+      else if (mode === 'bl') { L = ox + dx; W = ow - dx; H = oh + dy; }
+      else { W = ow + dx; H = oh + dy; } // br
+      if (W < 240) { L = ox + (ow - 240); W = 240; }
+      if (H < 140) { if (mode === 'tl') T = oy + (oh - 140); H = 140; }
+      if (L < 0) { W += L; L = 0; }
+      if (T < 0) { H += T; T = 0; }
+      if (L + W > window.innerWidth) W = window.innerWidth - L;
+      if (T + H > window.innerHeight) H = window.innerHeight - T;
+      if (W < 240) W = 240;
+      if (H < 140) H = 140;
+      box.style.left = L + 'px'; box.style.top = T + 'px';
+      box.style.width = W + 'px'; box.style.height = H + 'px';
+    });
+    const end = () => { a = false; };
+    handle.addEventListener('pointerup', end);
+    handle.addEventListener('pointercancel', end);
+  };
+  bindCorner($('mpResizeBL'), 'bl');
+  bindCorner($('mpResizeTL'), 'tl');
 }
 initMiniInteractions();
 function applyWebFs(on) {
