@@ -163,6 +163,11 @@
     </div>
     <div class="p-row">
       <label class="fmt-opt" style="display:inline-flex;gap:8px">
+        <input type="checkbox" id="miniPlayerMode"> Click a program opens a mini preview player
+      </label>
+    </div>
+    <div class="p-row">
+      <label class="fmt-opt" style="display:inline-flex;gap:8px">
         <input type="checkbox" id="chnoMode"> Show channel number on video (auto-hides)
       </label>
     </div>
@@ -245,6 +250,15 @@
 
 <div class="toast" id="toast"></div>
 
+<!-- Mini preview player (program-click) -->
+<div class="mini-player" id="miniPlayer" style="display:none">
+  <div class="mp-head">
+    <span class="mp-title" id="mpTitle"></span>
+    <button class="mp-close" id="mpClose" title="Close preview">✕</button>
+  </div>
+  <video id="mpVideo" autoplay playsinline></video>
+</div>
+
 <!-- Web player overlay -->
 <div class="webplayer" id="webplayer" style="display:none">
   <div class="wp-head">
@@ -272,7 +286,7 @@
 <script>
 const $ = id => document.getElementById(id);
 const stage = $('stage');
-const state = { channels: [], groups: [], now: Date.now(), fav: new Set(), current: null, dfmt: 'DMY', sel: null, view: [], lang: 'en', translate: false, fullscreen: false, netCache: 3000, relay: false, player: 'vlc', webBuffer: 30, hw: false, quality: 'auto', debug: false, autoRestart: true, chno: true, loadLast: true, h12: false, adv: false, useProxy: false, vpn: false, proxy: '' };
+const state = { channels: [], groups: [], now: Date.now(), fav: new Set(), current: null, dfmt: 'DMY', sel: null, view: [], lang: 'en', translate: false, fullscreen: false, netCache: 3000, relay: false, player: 'vlc', webBuffer: 30, hw: false, quality: 'auto', debug: false, autoRestart: true, chno: true, loadLast: true, h12: false, adv: false, useProxy: false, vpn: false, proxy: '', miniPlayer: true };
 let timer = null, toastTimer = null, activeLoadId = 0;
 const LS_SOURCES = 'vlcEpgSources';
 const LS_FAV = 'vlcEpgFavorites';
@@ -297,6 +311,7 @@ const LS_PROXY = 'vlcEpgProxy';
 const LS_USEPROXY = 'vlcEpgUseProxy';
 const LS_VPN = 'vlcEpgVpn';
 const LS_WEBUF = 'vlcEpgWebBuffer';
+const LS_MINI = 'vlcEpgMiniPlayer';
 
 function storageGet(key, fallback) {
   try { const value = localStorage.getItem(key); return value == null ? fallback : value; }
@@ -664,6 +679,7 @@ function openSettings() {
   $('proxySel').value = state.proxy || '';
   $('proxyEnableMode').checked = state.useProxy;
   $('vpnMode').checked = state.vpn;
+  $('miniPlayerMode').checked = state.miniPlayer;
   updateProxyUI();
   const _panel = document.querySelector('#overlay .panel'); if (_panel) _panel.classList.toggle('adv-on', state.adv);
   $('dbgMode').checked = state.debug;
@@ -746,6 +762,11 @@ $('vpnMode').addEventListener('change', e => {
   storageSet(LS_VPN, state.vpn ? '1' : '0');
   updateProxyUI();
   toast('Using system VPN ' + (state.vpn ? 'on' : 'off'));
+});
+$('miniPlayerMode').addEventListener('change', e => {
+  state.miniPlayer = e.target.checked;
+  storageSet(LS_MINI, state.miniPlayer ? '1' : '0');
+  toast('Mini preview player ' + (state.miniPlayer ? 'on' : 'off'));
 });
 $('probeProxyBtn').addEventListener('click', async () => {
   const sel = $('proxyResults'), hint = $('proxyHint'), btn = $('probeProxyBtn');
@@ -1157,7 +1178,8 @@ function render() {
       const idx = parseInt(el.dataset.idx, 10);
       const ch = channels[idx];
       const full = (ch.programs || []).find(p => p.start === parseInt(el.dataset.start,10) && p.stop === parseInt(el.dataset.stop,10));
-      showDetails(ch, full || {
+      if (state.miniPlayer && ch && ch.url) { openMiniPlayer(ch); }
+      else showDetails(ch, full || {
         title: el.dataset.tt, desc: el.dataset.desc, cat: el.dataset.cat,
         icon: el.dataset.icon || '', start: parseInt(el.dataset.start,10), stop: parseInt(el.dataset.stop,10)
       });
@@ -1333,6 +1355,30 @@ function showPlayerErr(msg) {
   const el = $('wpError');
   if (el) { el.textContent = msg || ''; el.style.display = msg ? 'flex' : 'none'; }
 }
+async function openMiniPlayer(ch) {
+  const box = $('miniPlayer'); if (!box) return;
+  const vid = $('mpVideo');
+  $('mpTitle').textContent = ch.name;
+  box.style.display = 'block';
+  post('/stop', {}).catch(() => {});
+  vid.pause(); vid.removeAttribute('src'); vid.load();
+  dbgLog('mini_open', { ch: ch.name });
+  try {
+    const r4 = await post('/streammp4', { url: ch.url, buffer: state.webBuffer, tc: false, proxy: effectiveProxy() });
+    if (r4.codecs) window._codecs = r4.codecs;
+    vid.src = r4.url;
+    vid.onloadedmetadata = () => vid.play().catch(() => {});
+    vid.onerror = () => { dbgLog('mini_fail', {}); toast('Mini preview failed — try the main player', true); };
+  } catch (e) {
+    toast('Mini preview failed: ' + e.message, true);
+  }
+}
+$('mpClose').addEventListener('click', () => {
+  post('/stop', {}).catch(() => {});
+  const box = $('miniPlayer'), vid = $('mpVideo');
+  box.style.display = 'none';
+  vid.pause(); vid.removeAttribute('src'); vid.load();
+});
 function applyWebFs(on) {
   const el = $('webplayer');
   try {
@@ -2141,6 +2187,7 @@ state.adv = storageGet(LS_ADV, '0') === '1';
 state.proxy = storageGet(LS_PROXY, '');
 state.useProxy = storageGet(LS_USEPROXY, '0') === '1';
 state.vpn = storageGet(LS_VPN, '0') === '1';
+state.miniPlayer = storageGet(LS_MINI, '1') === '1';
 state.debug = storageGet(LS_DEBUG, '0') === '1';
 state.autoRestart = storageGet(LS_AR, '1') === '1';
 state.player = storageGet(LS_PLAYER, 'vlc') === 'web' ? 'web' : 'vlc';
