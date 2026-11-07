@@ -48,7 +48,7 @@
       <option value="epg">With EPG</option>
     </select>
     <span class="grp">Lang:</span>
-    <select id="langF"><option value="">All languages</option></select>
+    <select id="langF" multiple size="4" title="Hold Ctrl/Cmd to pick several languages"><option value="">All languages</option></select>
     <span class="grp">Genre:</span>
     <select id="genreF"><option value="">All genres</option></select>
     <span class="grp">Category:</span>
@@ -1003,6 +1003,14 @@ function buildRuler(halfHours, pxPerHour, now, width, chW) {
   return html + '</div>';
 }
 function favKey(ch) { return ch.tvg_id || ch.name; }
+const LANG_LIST = ['en','es','fr','de','it','pt','nl','ru','zh','ja','ko','ar','hi','tr','pl','cs','hu','ro','bg','el','he','th','vi','id','ms','sv','no','da','fi','uk','fa','ur','bn','ta','te','ml','fil','sw','am','my','ne','si','km','lo','az','ka','hy'];
+function populateMultiSelect(id, values, allLabel, selectedVals) {
+  const el = $(id); if (!el) return;
+  const sel = new Set((selectedVals || []).map(String));
+  let html = `<option value="" ${!sel.size ? 'selected' : ''}>${allLabel}</option>`;
+  for (const v of values) { if (!v || v === '') continue; html += `<option ${sel.has(String(v)) ? 'selected' : ''}>${escapeHtml(v)}</option>`; }
+  el.innerHTML = html;
+}
 function progHasLang(p, lang) {
   const l = String(lang).toLowerCase();
   if (p.lang && String(p.lang).toLowerCase() === l) return true;
@@ -1039,12 +1047,12 @@ function render() {
   const selGroup = $('group').value;
   const filterMode = $('filter').value;
   const q = $('q').value.trim().toLowerCase();
-  const langSel = $('langF').value;
+  const langSel = [...$('langF').selectedOptions].map(o => o.value).filter(v => v !== '');
   const genreSel = $('genreF').value;
   const catSel = $('catF').value;
 
   // Build filter option lists from real channel/program data (preserving current selection).
-  const langSet = new Set(), genreSet = new Set(), catSet = new Set();
+  const langSet = new Set(LANG_LIST), genreSet = new Set(), catSet = new Set();
   for (const c of state.channels) {
     if (c.group) catSet.add(c.group);
     for (const p of (c.programs || [])) {
@@ -1054,7 +1062,7 @@ function render() {
       for (const d of (p.descs || [])) if (d.lang) langSet.add(d.lang);
     }
   }
-  populateSelect('langF', [...langSet], 'All languages');
+  populateMultiSelect('langF', [...langSet], 'All languages', langSel);
   populateSelect('genreF', [...genreSet], 'All genres');
   populateSelect('catF', [...catSet], 'All categories');
 
@@ -1062,7 +1070,7 @@ function render() {
   if (selGroup) channels = channels.filter(c => c.group === selGroup);
   if (filterMode === 'fav') channels = channels.filter(c => state.fav.has(favKey(c)));
   if (filterMode === 'epg') channels = channels.filter(c => c.epg);
-  if (langSel) channels = channels.filter(c => (c.programs || []).some(p => progHasLang(p, langSel)));
+  if (langSel.length) channels = channels.filter(c => (c.programs || []).some(p => langSel.some(l => progHasLang(p, l))));
   if (genreSel) channels = channels.filter(c => (c.programs || []).some(p => p.cat === genreSel));
   if (catSel) channels = channels.filter(c => c.group === catSel);
   if (q) {
