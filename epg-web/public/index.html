@@ -1566,6 +1566,7 @@ async function playWeb(ch) {
   const $p = $('webplayer'), vid = $('wpVideo');
   $('wpTitle').textContent = ch.name;
   state._cur = ch;
+  post('/stop', {}).catch(() => {});   // free any previous relay (MP4/HLS/VLC)
   $p.style.display = 'flex';
   if (state.fullscreen) applyWebFs(true);
   showLoader(true);
