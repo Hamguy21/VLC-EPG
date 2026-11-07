@@ -12,6 +12,9 @@ switch channels.
 
 ![columns](images/columns.png)
 
+<img width="812" height="480" alt="drawer-open" src="https://github.com/user-attachments/assets/e795c64b-33a2-4100-bcc0-9fb158425917" />
+
+
 ## What it does
 
 - Parses an M3U playlist from a **local file path** or **HTTP/HTTPS URL**
