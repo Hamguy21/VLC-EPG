@@ -1342,6 +1342,7 @@ async function playWeb(ch) {
   const latest = () => seq === _playSeq;
   const $p = $('webplayer'), vid = $('wpVideo');
   $('wpTitle').textContent = ch.name;
+  state._aIdx = null;
   state._cur = ch;
   post('/stop', {}).catch(() => {});   // free any previous relay (MP4/HLS/VLC)
   $p.style.display = 'flex';
@@ -1376,6 +1377,7 @@ function showPlayerErr(msg) {
   const el = $('wpError');
   if (el) { el.textContent = msg || ''; el.style.display = msg ? 'flex' : 'none'; }
 }
+
 async function openMiniPlayer(ch) {
   if (!ch || !ch.url) return;
   const existing = state._minis.find(m => m.ch_url === ch.url);
@@ -1608,8 +1610,9 @@ function dbgLog(k, o) {
 // Start the native MP4 relay and attach the video + auto-reconnect monitor.
 async function startMp4(ch, quiet, tc) {
   const vid = $('wpVideo');
-  const r4 = await post('/streammp4', { url: ch.url, buffer: state.webBuffer, tc: !!tc, proxy: effectiveProxy() });
+  const r4 = await post('/streammp4', { url: ch.url, buffer: state.webBuffer, tc: !!tc, proxy: effectiveProxy(), aIdx: state._aIdx });
   if (r4.codecs) window._codecs = r4.codecs;
+  window._audioTracks = Array.isArray(r4.audioTracks) ? r4.audioTracks : [];
   clearChErr(ch);
   dbgLog(tc ? 'mp4_relay_tc' : 'mp4_relay', { codecs: r4.codecs || null, buffer: state.webBuffer, tc: !!tc });
   vid._checkedEnded = false; vid._stopStall = false;
@@ -1881,6 +1884,15 @@ $('wpClose').addEventListener('click', closeWeb);
 function showCtx(x, y, hasStats) {
   const menu = $('ctxMenu');
   const q = state.quality;
+  const tracks = window._audioTracks || [];
+  const audioHtml = tracks.length > 1
+    ? `<div class="ctx-sep"></div><div class="ctx-item ctx-ah"><span>Audio track</span></div>` +
+      tracks.map(t => {
+        const lang = t.lang ? ' (' + t.lang + ')' : '';
+        const on = state._aIdx === t.index ? '✓' : '';
+        return `<div class="ctx-item" data-act="a-${t.index}"><span>&nbsp;&nbsp;${escapeHtml(t.codec)}${escapeHtml(lang)}</span><span class="chk">${on}</span></div>`;
+      }).join('')
+    : '';
   menu.innerHTML =
     (state.debug ? `<div class="ctx-item" data-act="dbg"><span>🐞 Debug records (export)</span><span class="chk"></span></div><div class="ctx-sep"></div>` : '') +
     `<div class="ctx-item" data-act="stats"><span>Stats for nerds</span><span class="chk">${hasStats ? '✓' : ''}</span></div>` +
@@ -1888,7 +1900,8 @@ function showCtx(x, y, hasStats) {
     `<div class="ctx-item" data-act="q-auto"><span>Quality</span><span class="chk">${q==='auto'?'Auto':''}</span></div>` +
     `<div class="ctx-item" data-act="q-high"><span>&nbsp;&nbsp;High (1080p)</span><span class="chk">${q==='high'?'✓':''}</span></div>` +
     `<div class="ctx-item" data-act="q-med"><span>&nbsp;&nbsp;Medium (720p)</span><span class="chk">${q==='med'?'✓':''}</span></div>` +
-    `<div class="ctx-item" data-act="q-low"><span>&nbsp;&nbsp;Low (480p)</span><span class="chk">${q==='low'?'✓':''}</span></div>`;
+    `<div class="ctx-item" data-act="q-low"><span>&nbsp;&nbsp;Low (480p)</span><span class="chk">${q==='low'?'✓':''}</span></div>` +
+    audioHtml;
   const wp = $('webplayer').getBoundingClientRect();
   menu.style.left = Math.min(x - wp.left, wp.width - 200) + 'px';
   menu.style.top = Math.min(y - wp.top, wp.height - 180) + 'px';
@@ -1901,6 +1914,12 @@ function showCtx(x, y, hasStats) {
       else if (act.startsWith('q-')) {
         state.quality = act.slice(2);
         toast('Stream quality preference: ' + state.quality + ' (auto/priority; VLC uses adaptive HLS)');
+      }
+      else if (act.startsWith('a-')) {
+        state._aIdx = parseInt(act.slice(2), 10);
+        toast('Switching to audio track ' + state._aIdx + '…');
+        const ch = state._cur;
+        if (ch) { showLoader(true); startMp4(ch).catch(() => showPlayerErr('⚠ Audio track switch failed')); }
       }
       menu.style.display = 'none';
     });

@@ -312,7 +312,6 @@
     padding:8px 12px; font-size:13px; font-weight:600; background:var(--panel2); cursor:move;
     user-select:none; -webkit-user-select:none; transition:opacity .25s; }
   .mini-player.idle .mp-head, .webplayer.idle .wp-head { opacity:0; pointer-events:none; }
-  .webplayer .wp-head { transition:opacity .25s; }
   body.tv.cursor-idle, body.tv.cursor-idle * { cursor:none !important; }
   #tvHint { position:fixed; left:50%; transform:translateX(-50%); bottom:18px; z-index:120;
     font-size:12px; padding:6px 14px; background:rgba(0,0,0,.55); color:#eee;

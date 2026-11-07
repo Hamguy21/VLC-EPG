@@ -914,6 +914,16 @@ async function startMp4Relay(url, opts) {
       const rm = text.match(/(\d{2,5})x(\d{2,5})/); if (rm) res = rm[1] + '×' + rm[2];
       return { video, audio, res };
     };
+    const parseAudioTracks = () => {
+      const out = [];
+      const text = r.head.join('\n');
+      const re = /Stream #0:(\d+)\(?([a-z]{2,3})?\)?: Audio: ([^\s,]+)/g;
+      let m;
+      while ((m = re.exec(text))) {
+        out.push({ index: parseInt(m[1], 10), lang: m[2] || '', codec: m[3] });
+      }
+      return out;
+    };
     const tc = !!o.tc;
     const args = [
       '-hide_banner', '-loglevel', 'info', '-nostdin',
@@ -924,10 +934,12 @@ async function startMp4Relay(url, opts) {
       '-i', url,
     ];
     if (tc) {
-      args.push('-map', '0:v:0', '-map', '0:a:0', '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28', '-c:a', 'aac', '-b:a', '128k');
+      args.push('-map', '0:v:0', '-map', '0:a:' + (o.aIdx || 0), '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28', '-c:a', 'aac', '-b:a', '128k');
     } else if (o.noBsf) {
+      if (o.aIdx != null) args.push('-map', '0:v:0', '-map', '0:a:' + o.aIdx);
       args.push('-c', 'copy');
     } else {
+      if (o.aIdx != null) args.push('-map', '0:v:0', '-map', '0:a:' + o.aIdx);
       args.push('-c', 'copy', '-bsf:a', 'aac_adtstoasc');
     }
     args.push('-fflags', '+genpts+flush_packets+discardcorrupt', '-f', 'mp4',
@@ -943,7 +955,7 @@ async function startMp4Relay(url, opts) {
     const errLines = [];
     let settled = false;
     const fail = msg => { if (settled) return; settled = true; stopMp4Relay(id); const er = new Error(msg); er.status = 422; reject(er); };
-    const done = () => { if (settled) return; settled = true; resolve({ url: `http://127.0.0.1:${PORT}/relaymp4/${slug}/live.mp4`, relay: true, slug, id, codecs: codecs() }); startMp4Watchdog(id, url, o, r); };
+    const done = () => { if (settled) return; settled = true; resolve({ url: `http://127.0.0.1:${PORT}/relaymp4/${slug}/live.mp4`, relay: true, slug, id, codecs: codecs(), audioTracks: parseAudioTracks() }); startMp4Watchdog(id, url, o, r); };
     child.stderr.on('data', d => {
       const s = String(d);
       if (r.head.join('').length < 200000) r.head.push(s);
@@ -1562,9 +1574,9 @@ const server = http.createServer(async (req, res) => {
     if (p === '/streammp4' && req.method === 'POST') {
       if (req.headers['content-type']?.split(';')[0].trim() !== 'application/json')
         throw Object.assign(new Error('content-type must be application/json'), { status: 415 });
-      const { url, buffer, tc, proxy, id } = parseJSON(await readBody(req));
+      const { url, buffer, tc, proxy, id, aIdx } = parseJSON(await readBody(req));
       if (typeof url !== 'string' || !url.trim()) throw Object.assign(new Error('url is required'), { status: 400 });
-      const r = await startMp4WithRetry(url, { bufferMs: (Number(buffer) || 30) * 1000, tc: !!tc, proxy: proxy || '', id: id || 'main' });
+      const r = await startMp4WithRetry(url, { bufferMs: (Number(buffer) || 30) * 1000, tc: !!tc, proxy: proxy || '', id: id || 'main', aIdx: aIdx != null ? parseInt(aIdx, 10) : null });
       return sendJSON(res, 200, r);
     }
 
