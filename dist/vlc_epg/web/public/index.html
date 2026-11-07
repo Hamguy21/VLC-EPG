@@ -1442,9 +1442,10 @@ async function renderGridDbg(panel, s) {
   const rows = [...dbg.events.filter(mine), ...srv.filter(mine)].slice(-16);
   const line = e => {
     const lbl = e.k || e.msg || '?';
-    const rest = (e.code != null ? ' code=' + e.code : '') +
+    const rest = ((e.id != null ? ' [' + e.id + ']' : '') +
+      (e.code != null ? ' code=' + e.code : '') +
       (e.msg && e.k ? ' ' + String(e.msg).slice(0, 90) : '') +
-      (e.ch ? ' ch=' + e.ch : '');
+      (e.ch ? ' ch=' + e.ch : ''));
     return escapeHtml(new Date(e.t).toLocaleTimeString() + ' ' + lbl + rest);
   };
   const cc = s._codecs || {};
@@ -1459,6 +1460,7 @@ async function renderGridDbg(panel, s) {
     '<div style="max-height:150px;overflow:auto;font:10px/1.4 ui-monospace,Consolas,monospace;margin-top:6px;background:rgba(0,0,0,.25);border-radius:6px;padding:6px">' + body + '</div>' +
     '<div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">' +
       '<button class="stats-copy" data-copy="1">Copy</button>' +
+      '<button class="stats-copy" data-dl="1">Download (shared debug file)</button>' +
       '<button class="stats-copy" data-full="1">Full debug</button>' +
     '</div>';
   panel.querySelector('[data-copy]').onclick = () => {
@@ -1466,7 +1468,19 @@ async function renderGridDbg(panel, s) {
     if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(() => toast('Debug copied')).catch(() => {});
     else { const ta = document.createElement('textarea'); ta.value = txt; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); toast('Debug copied'); } catch (_) {} document.body.removeChild(ta); }
   };
+  panel.querySelector('[data-dl]').onclick = () => dlDebugJson(srv);
   panel.querySelector('[data-full]').onclick = () => { panel.style.display = 'none'; openDbg(); };
+}
+function dlDebugJson(srv) {
+  const payload = {
+    app: 'vlc-epg', exportedAt: new Date().toISOString(),
+    state: { quality: state.quality, player: state.player },
+    clientEvents: dbg.events, serverEvents: srv || []
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'epg-debug.json';
+  document.body.appendChild(a); a.click(); a.remove();
+  toast('Debug log exported (epg-debug.json)');
 }
 function toggleGridDbg(idx) {
   const s = state._gridSlots[idx]; if (!s) return;
