@@ -257,6 +257,13 @@
     <button class="mp-close" id="mpClose" title="Close preview">✕</button>
   </div>
   <video id="mpVideo" autoplay playsinline></video>
+  <div class="mp-controls" id="mpControls">
+    <button class="mp-btn" id="mpPlay" title="Play / Pause">▶</button>
+    <span class="mp-time" id="mpTime">0:00 / 0:00</span>
+    <input type="range" class="mp-seek" id="mpSeek" min="0" max="1000" value="0" title="Seek">
+    <button class="mp-btn" id="mpMute" title="Mute">🔊</button>
+    <input type="range" class="mp-vol" id="mpVol" min="0" max="100" value="100" title="Volume">
+  </div>
   <div class="mp-resize" id="mpResize" title="Drag to resize"></div>
   <div class="mp-resize-bl" id="mpResizeBL" title="Drag to resize"></div>
   <div class="mp-resize-tl" id="mpResizeTL" title="Drag to resize"></div>
@@ -1470,6 +1477,31 @@ function initMiniInteractions() {
   bindCorner($('mpResizeTL'), 'tl');
 }
 initMiniInteractions();
+
+// Video controls for the mini player (play/pause, seek, time, mute, volume).
+function initMiniControls() {
+  const vid = $('mpVideo'), playBtn = $('mpPlay'), seek = $('mpSeek'),
+        timeEl = $('mpTime'), mute = $('mpMute'), vol = $('mpVol');
+  const fmt = s => { s = Math.floor(s || 0); const m = Math.floor(s / 60); return m + ':' + String(s % 60).padStart(2, '0'); };
+  const upd = () => {
+    const d = vid.duration || 0;
+    if (d) seek.value = Math.round((vid.currentTime / d) * 1000);
+    timeEl.textContent = fmt(vid.currentTime) + ' / ' + fmt(d);
+    playBtn.textContent = vid.paused ? '▶' : '⏸';
+    vol.value = Math.round((vid.muted ? 0 : vid.volume) * 100);
+    mute.textContent = (vid.muted || vid.volume === 0) ? '🔇' : '🔊';
+  };
+  vid.addEventListener('timeupdate', upd);
+  vid.addEventListener('play', upd);
+  vid.addEventListener('pause', upd);
+  vid.addEventListener('loadedmetadata', upd);
+  vid.addEventListener('volumechange', upd);
+  playBtn.addEventListener('click', () => { if (vid.paused) vid.play().catch(() => {}); else vid.pause(); });
+  seek.addEventListener('input', () => { const d = vid.duration || 0; if (d) vid.currentTime = (seek.value / 1000) * d; });
+  mute.addEventListener('click', () => { vid.muted = !(vid.muted || vid.volume === 0); if (!vid.muted && vid.volume === 0) vid.volume = 1; upd(); });
+  vol.addEventListener('input', () => { vid.volume = (+vol.value) / 100; vid.muted = vol.value === '0'; upd(); });
+}
+initMiniControls();
 function applyWebFs(on) {
   const el = $('webplayer');
   try {
