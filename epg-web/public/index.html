@@ -1343,6 +1343,7 @@ async function playWeb(ch) {
   const $p = $('webplayer'), vid = $('wpVideo');
   $('wpTitle').textContent = ch.name;
   state._aIdx = null;
+  state._subIdx = null;
   state._cur = ch;
   post('/stop', {}).catch(() => {});   // free any previous relay (MP4/HLS/VLC)
   $p.style.display = 'flex';
@@ -1610,9 +1611,10 @@ function dbgLog(k, o) {
 // Start the native MP4 relay and attach the video + auto-reconnect monitor.
 async function startMp4(ch, quiet, tc) {
   const vid = $('wpVideo');
-  const r4 = await post('/streammp4', { url: ch.url, buffer: state.webBuffer, tc: !!tc, proxy: effectiveProxy(), aIdx: state._aIdx, scale: state.quality });
+  const r4 = await post('/streammp4', { url: ch.url, buffer: state.webBuffer, tc: !!tc, proxy: effectiveProxy(), aIdx: state._aIdx, scale: state.quality, sub: state._subIdx });
   if (r4.codecs) window._codecs = r4.codecs;
   window._audioTracks = Array.isArray(r4.audioTracks) ? r4.audioTracks : [];
+  window._subtitleTracks = Array.isArray(r4.subtitleTracks) ? r4.subtitleTracks : [];
   clearChErr(ch);
   dbgLog(tc ? 'mp4_relay_tc' : 'mp4_relay', { codecs: r4.codecs || null, buffer: state.webBuffer, tc: !!tc });
   vid._checkedEnded = false; vid._stopStall = false;
@@ -1888,6 +1890,22 @@ function showCtx(x, y, hasStats) {
   const build = (tracks) => {
     const curTrack = tracks.find(t => state._aIdx === t.index) || tracks[0];
     const audioLabel = curTrack ? (curTrack.codec + (curTrack.lang ? ' (' + curTrack.lang + ')' : '')) : '—';
+    const subs = window._subtitleTracks || [];
+    const subLabel = state._subIdx != null ? 'On' : 'Off';
+    const subHtml = `<div class="ctx-sep"></div>` +
+      `<div class="ctx-qwrap">` +
+      `<div class="ctx-item" data-act="s-tog"><span>Subtitles</span><span class="chk">${escapeHtml(subLabel)}</span><span class="ctx-arrow">▸</span></div>` +
+      `<div class="ctx-submenu">` +
+        `<div class="ctx-item" data-act="s-off"><span>Off</span><span class="chk">${state._subIdx==null?'✓':''}</span></div>` +
+        (subs.length
+          ? subs.map(s => {
+              const lang = s.lang ? ' (' + s.lang + ')' : '';
+              const on = state._subIdx === s.index ? '✓' : '';
+              return `<div class="ctx-item" data-act="s-${s.index}"><span>${escapeHtml(s.codec)}${escapeHtml(lang)}</span><span class="chk">${on}</span></div>`;
+            }).join('')
+          : `<div class="ctx-item" data-act="s-none" style="opacity:.6;cursor:default"><span>No subtitle tracks</span></div>`) +
+      `</div>` +
+      `</div>`;
     const audioHtml = `<div class="ctx-sep"></div>` +
       `<div class="ctx-qwrap">` +
       `<div class="ctx-item" data-act="a-tog"><span>Audio track</span><span class="chk">${escapeHtml(audioLabel)}</span><span class="ctx-arrow">▸</span></div>` +
@@ -1914,7 +1932,8 @@ function showCtx(x, y, hasStats) {
         `<div class="ctx-item" data-act="q-low"><span>Low (480p)</span><span class="chk">${q==='low'?'✓':''}</span></div>` +
       `</div>` +
       `</div>` +
-      audioHtml;
+      audioHtml +
+      subHtml;
     const wp = $('webplayer').getBoundingClientRect();
     menu.style.left = Math.min(x - wp.left, wp.width - 230) + 'px';
     menu.style.top = Math.min(y - wp.top, wp.height - 240) + 'px';
@@ -1925,7 +1944,7 @@ function showCtx(x, y, hasStats) {
         let keep = false;
         if (act === 'stats') toggleStats();
         else if (act === 'dbg') openDbg();
-        else if (act === 'q-tog' || act === 'a-tog') {
+        else if (act === 'q-tog' || act === 'a-tog' || act === 's-tog') {
           const wrap = it.closest('.ctx-qwrap');
           if (wrap) wrap.classList.toggle('open');
           keep = true;
@@ -1935,6 +1954,18 @@ function showCtx(x, y, hasStats) {
           storageSet(LS_QUALITY, state.quality);
           toast('Stream quality: ' + state.quality);
           if (state._cur && $('webplayer').style.display === 'flex') { showLoader(true); startMp4(state._cur).catch(() => showPlayerErr('⚠ Quality switch failed')); }
+        }
+        else if (act === 's-off') {
+          const ch = state._cur;
+          state._subIdx = null;
+          toast('Subtitles off');
+          if (ch) { showLoader(true); startMp4(ch).catch(() => showPlayerErr('⚠ Subtitle switch failed')); }
+        }
+        else if (act && /^s-\d+$/.test(act)) {
+          const ch = state._cur;
+          state._subIdx = parseInt(act.slice(2), 10);
+          toast('Subtitles on');
+          if (ch) { showLoader(true); startMp4(ch).catch(() => showPlayerErr('⚠ Subtitle switch failed')); }
         }
         else if (act && /^a-\d+$/.test(act)) {
           const chosen = parseInt(act.slice(2), 10);

@@ -757,7 +757,7 @@ async function startRelay(url, opts = {}) {
     const childEnv = { ...process.env };
     if (opts.proxy) { childEnv.http_proxy = opts.proxy; childEnv.https_proxy = opts.proxy; childEnv.all_proxy = opts.proxy; }
     let child;
-    try { child = spawn(ff, args, { detached: false, env: childEnv }); }
+    try { child = spawn(ff, args, { detached: false, env: childEnv, cwd: dir }); }
     catch (e) { return reject(new Error('failed to start FFmpeg: ' + e.message)); }
     relayChild = child; relayDir = dir;
     const errLines = [];
@@ -844,7 +844,7 @@ function newRelayEntry(id, url, opts) {
   return {
     id, url, opts,
     child: null, file: null, slug: null, bufferMs: 30000,
-    head: [], liveMbps: 0, eof: false,
+    head: [], liveMbps: 0, eof: false, subtitleTracks: [],
     watch: null, lastSize: 0, lastGrow: 0, tStart: 0,
     forceFresh: false, br: createBr(),
   };
@@ -886,6 +886,21 @@ function relayAudioTracks(head) {
   }
   return out;
 }
+function relaySubtitleTracks(head) {
+  const out = [];
+  const seen = new Set();
+  const text = head.join('\n');
+  const re = /Stream #0:(\d+)(?:\(([^)]+)\))?: Subtitle: ([^\s,]+)/g;
+  let m;
+  while ((m = re.exec(text))) {
+    const idx = parseInt(m[1], 10);
+    const key = idx + '|' + (m[2] || '') + '|' + m[3];
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ index: idx, lang: m[2] || '', codec: m[3] });
+  }
+  return out;
+}
 function findRelayBySlug(slug) {
   for (const r of mp4Relays.values()) if (r.slug === slug) return r;
   return null;
@@ -922,6 +937,21 @@ async function startMp4Relay(url, opts) {
   if (/pluto\.tv/i.test(url)) { try { const f = await plutoFreshUrl(url, r.forceFresh); r.forceFresh = false; if (f) url = f; } catch (_) {} }
   r.tStart = Date.now();
   const ff = await ensureFFmpeg();
+  // Optional subtitle burn-in: extract the chosen subtitle stream to an SRT
+  // (best-effort sample) and burn it into the video via the 'subtitles' filter.
+  let subFile = null;
+  if (ff && o.sub != null) {
+    try {
+      const subDir = path.join(RELAY_DIR, slug);
+      fs.mkdirSync(subDir, { recursive: true });
+      const sf = path.join(subDir, 'sub.srt');
+      const ex = require('child_process').spawnSync(ff,
+        ['-y', '-loglevel', 'error', '-user_agent', DEFAULT_UA, '-headers', relayHeaders(url),
+         '-rw_timeout', '10000000', '-i', url, '-map', '0:s:' + o.sub,
+         '-t', '10', '-f', 'srt', sf], { timeout: 15000 });
+      if ((ex.status === 0 || ex.status == null) && fs.existsSync(sf) && fs.statSync(sf).size > 50) subFile = sf;
+    } catch (_) {}
+  }
   return new Promise((resolve, reject) => {
     if (!ff) { mp4Relays.delete(id); return reject(new Error('FFmpeg is not available on this system')); }
     const dir = path.join(RELAY_DIR, slug);
@@ -953,7 +983,12 @@ async function startMp4Relay(url, opts) {
       '-err_detect', 'ignore_err',
       '-i', url,
     ];
-    if (qScale) {
+    if (subFile) {
+      const vf = qScale ? (qScale + ',subtitles=sub.srt') : 'subtitles=sub.srt';
+      args.push('-map', '0:v:0', '-map', '0:a:' + (o.aIdx || 0));
+      args.push('-vf', vf);
+      args.push('-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '30', '-c:a', 'aac', '-b:a', '128k');
+    } else if (qScale) {
       args.push('-map', '0:v:0', '-map', '0:a:' + (o.aIdx || 0));
       args.push('-vf', qScale);
       args.push('-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '30', '-c:a', 'aac', '-b:a', '128k');
@@ -979,7 +1014,7 @@ async function startMp4Relay(url, opts) {
     const errLines = [];
     let settled = false;
     const fail = msg => { if (settled) return; settled = true; stopMp4Relay(id); const er = new Error(msg); er.status = 422; reject(er); };
-    const done = () => { if (settled) return; settled = true; resolve({ url: `http://127.0.0.1:${PORT}/relaymp4/${slug}/live.mp4`, relay: true, slug, id, codecs: codecs(), audioTracks: parseAudioTracks() }); startMp4Watchdog(id, url, o, r); };
+    const done = () => { if (settled) return; settled = true; resolve({ url: `http://127.0.0.1:${PORT}/relaymp4/${slug}/live.mp4`, relay: true, slug, id, codecs: codecs(), audioTracks: parseAudioTracks(), subtitleTracks: relaySubtitleTracks(r.head) }); startMp4Watchdog(id, url, o, r); };
     child.stderr.on('data', d => {
       const s = String(d);
       if (r.head.join('').length < 200000) r.head.push(s);
@@ -1588,7 +1623,7 @@ const server = http.createServer(async (req, res) => {
         const vm = text.match(/Video:\s*([^\s,]+)/); if (vm) video = vm[1];
         const am = text.match(/Audio:\s*([^\s,]+)/); if (am) audio = am[1];
         const rm = text.match(/(\d{2,5})x(\d{2,5})/); if (rm) resStr = rm[1] + '×' + rm[2];
-        return { id: r.id, slug: r.slug, active: !!r.child, ended: r.eof, connectionMbps: r.liveMbps, codecs: { video, audio, res: resStr }, audioTracks: relayAudioTracks(r.head) };
+        return { id: r.id, slug: r.slug, active: !!r.child, ended: r.eof, connectionMbps: r.liveMbps, codecs: { video, audio, res: resStr }, audioTracks: relayAudioTracks(r.head), subtitleTracks: relaySubtitleTracks(r.head) };
       });
       const main = list.find(x => x.id === 'main') || { active: false, ended: false, connectionMbps: 0, codecs: { video: '', audio: '', res: '' } };
       return sendJSON(res, 200, Object.assign({}, main, { relays: list }));
@@ -1598,9 +1633,9 @@ const server = http.createServer(async (req, res) => {
     if (p === '/streammp4' && req.method === 'POST') {
       if (req.headers['content-type']?.split(';')[0].trim() !== 'application/json')
         throw Object.assign(new Error('content-type must be application/json'), { status: 415 });
-      const { url, buffer, tc, proxy, id, aIdx, scale } = parseJSON(await readBody(req));
+      const { url, buffer, tc, proxy, id, aIdx, scale, sub } = parseJSON(await readBody(req));
       if (typeof url !== 'string' || !url.trim()) throw Object.assign(new Error('url is required'), { status: 400 });
-      const r = await startMp4WithRetry(url, { bufferMs: (Number(buffer) || 30) * 1000, tc: !!tc, proxy: proxy || '', id: id || 'main', aIdx: aIdx != null ? parseInt(aIdx, 10) : null, scale: scale || 'auto' });
+      const r = await startMp4WithRetry(url, { bufferMs: (Number(buffer) || 30) * 1000, tc: !!tc, proxy: proxy || '', id: id || 'main', aIdx: aIdx != null ? parseInt(aIdx, 10) : null, scale: scale || 'auto', sub: sub != null ? parseInt(sub, 10) : null });
       return sendJSON(res, 200, r);
     }
 
