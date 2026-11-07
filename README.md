@@ -23,12 +23,12 @@ switch channels.
   `ATV.HD.tr`), then falls back to channel-name matching.
 - Loads the channels into VLC's **native playlist** and fills the columns:
 
-  | Column  | Shows                                                       |
-  |---------|-------------------------------------------------------------|
-  | Description | running program (bold) + upcoming programs             |
-  | Genre    | category of the running program                            |
-  | Album    | synopsis of the running program                            |
-  | Author   | channel group                                               |
+  | Column      | Shows                                                       |
+  |-------------|-------------------------------------------------------------|
+  | Description | running program (bold) + upcoming programs                  |
+  | Genre       | category of the running program                             |
+  | Album       | synopsis of the running program                             |
+  | Author      | channel group                                               |
 - Caches the parsed guide locally and refreshes it every 6 hours (or on demand).
 - Shows an OSD popup: "NOW / NEXT" with category and synopsis when you switch
   to a channel that has guide data.
@@ -39,11 +39,11 @@ switch channels.
 1. Quit VLC completely.
 2. Copy `vlc_epg.lua` into VLC's user **extensions** folder:
 
-   | OS | Folder |
-   |----|--------|
-   | Windows | `%APPDATA%\vlc\lua\extensions\` |
-   | Linux | `~/.local/share/vlc/lua/extensions/` |
-   | macOS | `~/Library/Application Support/org.videolan.vlc/lua/extensions/` |
+   | OS      | Folder                                                           |
+   |---------|------------------------------------------------------------------|
+   | Windows | `%APPDATA%\vlc\lua\extensions\`                                  |
+   | Linux   | `~/.local/share/vlc/lua/extensions/`                             |
+   | macOS   | `~/Library/Application Support/org.videolan.vlc/lua/extensions/` |
 
    > Do **not** put it inside the VLC app folder — VLC only reads user
    > extensions from the path above, and app updates wipe it.
