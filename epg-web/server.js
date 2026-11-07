@@ -858,6 +858,21 @@ function stopMp4Relay(id) {
   const r = mp4Relays.get(key);
   if (r) { killRelay(r); mp4Relays.delete(key); }
 }
+function relayAudioTracks(head) {
+  const out = [];
+  const seen = new Set();
+  const text = head.join('\n');
+  const re = /Stream #0:(\d+)(?:\(([^)]+)\))?: Audio: ([^\s,]+)/g;
+  let m;
+  while ((m = re.exec(text))) {
+    const idx = parseInt(m[1], 10);
+    const key = idx + '|' + (m[2] || '') + '|' + m[3];
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ index: idx, lang: m[2] || '', codec: m[3] });
+  }
+  return out;
+}
 function findRelayBySlug(slug) {
   for (const r of mp4Relays.values()) if (r.slug === slug) return r;
   return null;
@@ -914,21 +929,7 @@ async function startMp4Relay(url, opts) {
       const rm = text.match(/(\d{2,5})x(\d{2,5})/); if (rm) res = rm[1] + '×' + rm[2];
       return { video, audio, res };
     };
-    const parseAudioTracks = () => {
-      const out = [];
-      const seen = new Set();
-      const text = r.head.join('\n');
-      const re = /Stream #0:(\d+)(?:\(([^)]+)\))?: Audio: ([^\s,]+)/g;
-      let m;
-      while ((m = re.exec(text))) {
-        const idx = parseInt(m[1], 10);
-        const key = idx + '|' + (m[2] || '') + '|' + m[3];
-        if (seen.has(key)) continue;
-        seen.add(key);
-        out.push({ index: idx, lang: m[2] || '', codec: m[3] });
-      }
-      return out;
-    };
+    const parseAudioTracks = () => relayAudioTracks(r.head);
     const tc = !!o.tc;
     const args = [
       '-hide_banner', '-loglevel', 'info', '-nostdin',
@@ -1569,7 +1570,7 @@ const server = http.createServer(async (req, res) => {
         const vm = text.match(/Video:\s*([^\s,]+)/); if (vm) video = vm[1];
         const am = text.match(/Audio:\s*([^\s,]+)/); if (am) audio = am[1];
         const rm = text.match(/(\d{2,5})x(\d{2,5})/); if (rm) resStr = rm[1] + '×' + rm[2];
-        return { id: r.id, slug: r.slug, active: !!r.child, ended: r.eof, connectionMbps: r.liveMbps, codecs: { video, audio, res: resStr } };
+        return { id: r.id, slug: r.slug, active: !!r.child, ended: r.eof, connectionMbps: r.liveMbps, codecs: { video, audio, res: resStr }, audioTracks: relayAudioTracks(r.head) };
       });
       const main = list.find(x => x.id === 'main') || { active: false, ended: false, connectionMbps: 0, codecs: { video: '', audio: '', res: '' } };
       return sendJSON(res, 200, Object.assign({}, main, { relays: list }));

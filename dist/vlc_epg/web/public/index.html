@@ -1884,46 +1884,57 @@ $('wpClose').addEventListener('click', closeWeb);
 function showCtx(x, y, hasStats) {
   const menu = $('ctxMenu');
   const q = state.quality;
-  const tracks = window._audioTracks || [];
-  const audioHtml = tracks.length
-    ? `<div class="ctx-sep"></div><div class="ctx-item ctx-ah"><span>Audio track</span></div>` +
-      tracks.map(t => {
-        const lang = t.lang ? ' (' + t.lang + ')' : '';
-        const on = state._aIdx === t.index || (state._aIdx == null && t.index === (tracks[0].index)) ? '✓' : '';
-        return `<div class="ctx-item" data-act="a-${t.index}"><span>&nbsp;&nbsp;${escapeHtml(t.codec)}${escapeHtml(lang)}</span><span class="chk">${on}</span></div>`;
-      }).join('')
-    : '';
-  menu.innerHTML =
-    (state.debug ? `<div class="ctx-item" data-act="dbg"><span>🐞 Debug records (export)</span><span class="chk"></span></div><div class="ctx-sep"></div>` : '') +
-    `<div class="ctx-item" data-act="stats"><span>Stats for nerds</span><span class="chk">${hasStats ? '✓' : ''}</span></div>` +
-    `<div class="ctx-sep"></div>` +
-    `<div class="ctx-item" data-act="q-auto"><span>Quality</span><span class="chk">${q==='auto'?'Auto':''}</span></div>` +
-    `<div class="ctx-item" data-act="q-high"><span>&nbsp;&nbsp;High (1080p)</span><span class="chk">${q==='high'?'✓':''}</span></div>` +
-    `<div class="ctx-item" data-act="q-med"><span>&nbsp;&nbsp;Medium (720p)</span><span class="chk">${q==='med'?'✓':''}</span></div>` +
-    `<div class="ctx-item" data-act="q-low"><span>&nbsp;&nbsp;Low (480p)</span><span class="chk">${q==='low'?'✓':''}</span></div>` +
-    audioHtml;
-  const wp = $('webplayer').getBoundingClientRect();
-  menu.style.left = Math.min(x - wp.left, wp.width - 200) + 'px';
-  menu.style.top = Math.min(y - wp.top, wp.height - 180) + 'px';
-  menu.style.display = 'block';
-  document.querySelectorAll('#ctxMenu .ctx-item').forEach(it => {
-    it.addEventListener('click', () => {
-      const act = it.dataset.act;
-      if (act === 'stats') toggleStats();
-      else if (act === 'dbg') openDbg();
-      else if (act.startsWith('q-')) {
-        state.quality = act.slice(2);
-        toast('Stream quality preference: ' + state.quality + ' (auto/priority; VLC uses adaptive HLS)');
-      }
-      else if (act.startsWith('a-')) {
-        state._aIdx = parseInt(act.slice(2), 10);
-        toast('Switching to audio track ' + state._aIdx + '…');
-        const ch = state._cur;
-        if (ch) { showLoader(true); startMp4(ch).catch(() => showPlayerErr('⚠ Audio track switch failed')); }
-      }
-      menu.style.display = 'none';
+  const build = (tracks) => {
+    const audioHtml = tracks.length
+      ? `<div class="ctx-sep"></div><div class="ctx-item ctx-ah"><span>Audio track</span></div>` +
+        tracks.map(t => {
+          const lang = t.lang ? ' (' + t.lang + ')' : '';
+          const on = state._aIdx === t.index || (state._aIdx == null && t.index === (tracks[0].index)) ? '✓' : '';
+          return `<div class="ctx-item" data-act="a-${t.index}"><span>&nbsp;&nbsp;${escapeHtml(t.codec)}${escapeHtml(lang)}</span><span class="chk">${on}</span></div>`;
+        }).join('')
+      : '';
+    menu.innerHTML =
+      (state.debug ? `<div class="ctx-item" data-act="dbg"><span>🐞 Debug records (export)</span><span class="chk"></span></div><div class="ctx-sep"></div>` : '') +
+      `<div class="ctx-item" data-act="stats"><span>Stats for nerds</span><span class="chk">${hasStats ? '✓' : ''}</span></div>` +
+      `<div class="ctx-sep"></div>` +
+      `<div class="ctx-item" data-act="q-auto"><span>Quality</span><span class="chk">${q==='auto'?'Auto':''}</span></div>` +
+      `<div class="ctx-item" data-act="q-high"><span>&nbsp;&nbsp;High (1080p)</span><span class="chk">${q==='high'?'✓':''}</span></div>` +
+      `<div class="ctx-item" data-act="q-med"><span>&nbsp;&nbsp;Medium (720p)</span><span class="chk">${q==='med'?'✓':''}</span></div>` +
+      `<div class="ctx-item" data-act="q-low"><span>&nbsp;&nbsp;Low (480p)</span><span class="chk">${q==='low'?'✓':''}</span></div>` +
+      audioHtml;
+    const wp = $('webplayer').getBoundingClientRect();
+    menu.style.left = Math.min(x - wp.left, wp.width - 230) + 'px';
+    menu.style.top = Math.min(y - wp.top, wp.height - 240) + 'px';
+    menu.style.display = 'block';
+    document.querySelectorAll('#ctxMenu .ctx-item').forEach(it => {
+      it.addEventListener('click', () => {
+        const act = it.dataset.act;
+        if (act === 'stats') toggleStats();
+        else if (act === 'dbg') openDbg();
+        else if (act && act.startsWith('q-')) {
+          state.quality = act.slice(2);
+          toast('Stream quality preference: ' + state.quality + ' (auto/priority; VLC uses adaptive HLS)');
+        }
+        else if (act && act.startsWith('a-')) {
+          state._aIdx = parseInt(act.slice(2), 10);
+          toast('Switching to audio track ' + state._aIdx + '…');
+          const ch = state._cur;
+          if (ch) { showLoader(true); startMp4(ch).catch(() => showPlayerErr('⚠ Audio track switch failed')); }
+        }
+        menu.style.display = 'none';
+      });
     });
-  });
+  };
+  build(window._audioTracks || []);
+  // If no audio tracks known yet (e.g. HLS fallback or opened before relay
+  // metadata arrived), fetch them lazily from the server and refresh the menu.
+  if (!(window._audioTracks || []).length) {
+    fetch('/relayinfo').then(r => r.json()).then(j => {
+      const main = j.relays && j.relays.find(x => x.id === 'main');
+      const t = (main && main.audioTracks) || [];
+      if (t.length) { window._audioTracks = t; if (menu.style.display === 'block') build(t); }
+    }).catch(() => {});
+  }
 }
 // Clicking anywhere outside the context menu closes it; that first click is
 // swallowed so it doesn't also toggle play/pause. Subsequent clicks behave normally.

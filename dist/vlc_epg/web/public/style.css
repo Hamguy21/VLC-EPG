@@ -210,7 +210,7 @@
     color:#ff8a8a; background:rgba(255,80,80,.12); border:1px solid rgba(255,90,90,.35); }
   .wp-chlist .wcl-err { color:#ffb020; font-size:12px; flex:none; }
   .ctx-menu { position:absolute; z-index:10; background:#161b26; border:1px solid var(--border);
-    border-radius:10px; box-shadow:0 8px 30px rgba(0,0,0,.5); min-width:190px; overflow:hidden; }
+    border-radius:10px; box-shadow:0 8px 30px rgba(0,0,0,.45); max-height:calc(100vh - 80px); overflow-y:auto;0,.5); min-width:190px; overflow:hidden; }
   .ctx-menu .ctx-item { padding:9px 14px; font-size:13px; cursor:pointer; display:flex; justify-content:space-between; gap:14px; }
   .ctx-menu .ctx-item:hover { background:rgba(86,115,245,.15); }
   .ctx-menu .ctx-sep { height:1px; background:var(--border); margin:4px 0; }
