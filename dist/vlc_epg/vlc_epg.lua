@@ -1027,16 +1027,34 @@ local function launch_web()
   dir = native_path(dir)
 
   if not web_running() then
-    if not has_node() then
+    -- Prefer the bundled launcher, which auto-installs a portable Node.js on
+    -- first run if the system has none.
+    local launcher = is_windows() and (dir .. "\\start-web.bat") or (dir .. "/start-web.sh")
+    local lf = io.open(launcher, "r")
+    local hasL = lf ~= nil
+    if lf then lf:close() end
+
+    if not hasL and not has_node() then
       return false, "Node.js is not installed - install it from https://nodejs.org (required for the web TV-guide)"
     end
+
     if is_windows() then
-      run_shell('start "" /D "' .. dir .. '" cmd /c "node server.js"')
+      if hasL then
+        run_shell('start "" /D "' .. dir .. '" cmd /c "start-web.bat"')
+      else
+        run_shell('start "" /D "' .. dir .. '" cmd /c "node server.js"')
+      end
     else
-      run_shell('cd "' .. dir .. '" && nohup node server.js >/dev/null 2>&1 &')
+      if hasL then
+        run_shell('cd "' .. dir .. '" && nohup ./start-web.sh >/dev/null 2>&1 &')
+      else
+        run_shell('cd "' .. dir .. '" && nohup node server.js >/dev/null 2>&1 &')
+      end
     end
-    -- wait up to ~8s for the server to listen before opening the browser
-    local deadline = os.clock() + 8
+
+    -- wait up to ~12s for the server to listen before opening the browser
+    -- (first run may have to download a portable Node.js)
+    local deadline = os.clock() + 12
     while os.clock() < deadline do
       if web_running() then break end
       local t = os.clock()

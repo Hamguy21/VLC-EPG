@@ -10,6 +10,7 @@ mkdir -p "$dist/web"
 (cd epg-web && tar --exclude=node_modules --exclude=data --exclude=backup \
      --exclude=shot.js --exclude=start.cmd --exclude=package-lock.json \
      -cf - .) | (cd "$dist/web" && tar -xf -)
+chmod +x "$dist/web/start-web.sh"
 cp INSTALL.md "$dist/INSTALL.md"
 # release zip (name from the extension version)
 ver=$(grep -oE 'version = "[0-9.]+"' src/vlc_epg.lua | grep -oE '[0-9.]+' | head -1)
