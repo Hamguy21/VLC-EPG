@@ -206,3 +206,5 @@ touching any markup or logic:
 
 Layout and component rules live separately in `public/style.css` for deeper
 changes.
+#   V L C - E P G  
+ 
